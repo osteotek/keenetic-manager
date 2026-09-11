@@ -1,0 +1,6 @@
+# Run ./keenetic-policy.sh --init to create this file interactively, or copy
+# this example to ~/.config/keenetic-policy/config and chmod it 600.
+# Values are literal: do not add shell quotes.
+ROUTER_URL=http://192.168.1.1
+ROUTER_USERNAME=admin
+ROUTER_PASSWORD=replace-with-router-password
