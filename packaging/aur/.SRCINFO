@@ -1,0 +1,16 @@
+pkgbase = keenetic-policy
+	pkgdesc = CLI for Keenetic client policies, Internet blocks, and Wake-on-LAN
+	pkgver = 1.1.0
+	pkgrel = 1
+	url = https://github.com/osteotek/omarchy-keenetic
+	arch = any
+	license = MIT
+	depends = bash
+	depends = curl
+	depends = jq
+	depends = coreutils
+	optdepends = fzf: searchable interactive menus
+	source = keenetic-policy-1.1.0.tar.gz::https://github.com/osteotek/omarchy-keenetic/releases/download/v1.1.0/keenetic-policy-1.1.0.tar.gz
+	sha256sums = fa0f657b808b49f7ae09b00e06ed6e6ea9b82f2a0fcc7485d38366a3dd79d73f
+
+pkgname = keenetic-policy

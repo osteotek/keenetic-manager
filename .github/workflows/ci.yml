@@ -13,6 +13,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y jq shellcheck
+        run: sudo apt-get update && sudo apt-get install -y jq shellcheck openssl ruby debhelper
       - name: Run checks
         run: make check
+      - name: Validate release artifacts and package metadata
+        run: |
+          make release
+          (cd dist && sha256sum -c SHA256SUMS)
+          ruby -c packaging/homebrew/keenetic-policy.rb
+          expected=$(sed -n "s/^sha256sums=('\\([^']*\\)').*/\\1/p" packaging/aur/PKGBUILD)
+          actual=$(sha256sum dist/keenetic-policy-1.1.0.tar.gz)
+          test "$expected" = "${actual%% *}"
+      - name: Build Debian package
+        run: |
+          cp -a packaging/debian debian
+          dpkg-buildpackage --no-sign --build=binary

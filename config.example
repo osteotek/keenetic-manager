@@ -4,8 +4,9 @@
 ROUTER_URL=http://192.168.1.1
 ROUTER_USERNAME=admin
 ROUTER_PASSWORD=replace-with-router-password
-# Instead of ROUTER_PASSWORD, a command can print the password:
+# Instead of ROUTER_PASSWORD, exactly one command or file can provide it:
 # ROUTER_PASSWORD_COMMAND=secret-tool lookup service keenetic-policy
+# ROUTER_PASSWORD_FILE=/home/user/.config/keenetic-policy/password
 # For a private HTTPS CA:
 # ROUTER_CA_FILE=/home/user/.local/share/keenetic/router-ca.pem
 ROUTER_INSECURE=false

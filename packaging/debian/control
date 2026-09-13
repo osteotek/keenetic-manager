@@ -1,0 +1,16 @@
+Source: keenetic-policy
+Section: net
+Priority: optional
+Maintainer: osteotek <osteotek@users.noreply.github.com>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.7.0
+Homepage: https://github.com/osteotek/omarchy-keenetic
+Rules-Requires-Root: no
+
+Package: keenetic-policy
+Architecture: all
+Depends: bash (>= 4.3), curl, jq, coreutils, ${misc:Depends}
+Recommends: fzf
+Description: manage Keenetic client network policies
+ Lists router clients and applies verified connection policies, Internet
+ blocks, and Wake-on-LAN actions through the Keenetic RCI API.

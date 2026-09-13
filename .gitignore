@@ -1,1 +1,6 @@
 /config
+/dist/
+__pycache__/
+*.deb
+*.buildinfo
+*.changes

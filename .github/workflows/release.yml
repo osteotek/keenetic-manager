@@ -1,0 +1,30 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install test dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq shellcheck
+      - name: Verify tag and run checks
+        run: |
+          version=$(./keenetic-policy.sh --version)
+          version=${version##* }
+          test "v$version" = "$GITHUB_REF_NAME"
+          make check
+      - name: Build deterministic artifacts
+        run: make release
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*

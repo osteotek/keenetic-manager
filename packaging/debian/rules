@@ -1,0 +1,13 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+override_dh_auto_build:
+
+override_dh_auto_test:
+	./tests/integration.sh
+
+override_dh_auto_install:
+	install -Dm755 keenetic-policy.sh debian/keenetic-policy/usr/bin/keenetic-policy
+	install -Dm644 completions/keenetic-policy.bash debian/keenetic-policy/usr/share/bash-completion/completions/keenetic-policy

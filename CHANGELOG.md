@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0 - 2026-09-13
+
+- Add bounded verification retries, dry-run plans, multi-client preflight, and rollback history.
+- Add client block, unblock, offline listing, and Wake-on-LAN actions.
+- Use `fzf` for searchable interaction when available, with a resize-aware Unicode-safe native fallback.
+- Add named router profiles, default-gateway discovery, password files, and sanitized verbose diagnostics.
+- Test real HTTPS trust paths and add an opt-in read-only real-router contract check.
+- Automate tagged release artifacts and add Arch, Homebrew, and Debian packaging definitions.
+
 ## 1.0.0 - 2026-09-11
 
 - List connected Keenetic clients and their active policies.
