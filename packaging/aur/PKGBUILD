@@ -1,6 +1,6 @@
 # Maintainer: osteotek
 pkgname=keenetic-policy
-pkgver=1.1.0
+pkgver=1.1.1
 pkgrel=1
 pkgdesc='CLI for Keenetic client policies, Internet blocks, and Wake-on-LAN'
 arch=('any')
@@ -9,7 +9,7 @@ license=('MIT')
 depends=('bash' 'curl' 'jq' 'coreutils')
 optdepends=('fzf: searchable interactive menus')
 source=("$pkgname-$pkgver.tar.gz::$url/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz")
-sha256sums=('c80054569f5d58682c1caba3e15776a66f59ae71ce0e46f1a97a0e4a404e458e')
+sha256sums=('ada3e52cf22d4e1626208538e3f5aeefa305877bd2db1a9bb46eba32c146d285')
 
 package() {
     cd "$srcdir/$pkgname-$pkgver"

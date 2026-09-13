@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 
 PROGRAM=${0##*/}
-VERSION=1.1.0
+VERSION=1.1.1
 EXIT_GENERAL=1
 EXIT_USAGE=2
 EXIT_CLIENT=3
@@ -1019,8 +1019,29 @@ arrow_menu() {
     done
 }
 
+fzf_client_rows() {
+    local name ip mac policy online display_name fitted_name fitted_ip fitted_policy status index=0
+    while IFS=$'\t' read -r name ip mac policy online; do
+        display_name=$name
+        [[ -z $CURRENT_CLIENT_MAC || $mac != "$CURRENT_CLIENT_MAC" ]] \
+            || display_name+=" (this device)"
+        fitted_name=$(shorten_text "$display_name" "$CLIENT_NAME_WIDTH")
+        fitted_ip=$(shorten_text "$ip" "$CLIENT_IP_WIDTH")
+        fitted_policy=$(shorten_text "$policy" "$CLIENT_POLICY_WIDTH")
+        status=offline
+        [[ $online == true ]] && status=online
+        printf "%d\t%-${CLIENT_NAME_WIDTH}s %-${CLIENT_IP_WIDTH}s %-${CLIENT_POLICY_WIDTH}s %-7s\n" \
+            "$index" "$fitted_name" "$fitted_ip" "$fitted_policy" "$status"
+        index=$((index + 1))
+    done < <(
+        jq -r --slurpfile policies "$TMP_DIR/policies.json" \
+            ".[] | [.name, .ip, .mac, ($policy_label_filter), .online] | @tsv" \
+            "$TMP_DIR/menu-clients.json"
+    )
+}
+
 select_client_from_candidates() {
-    local candidates=$1 heading=$2 count name ip mac policy online display_name index=0 selected selected_index
+    local candidates=$1 heading=$2 count name ip mac policy online display_name index=0 selected selected_index header
     count=$(jq 'length' <<< "$candidates")
     ((count > 0)) || fail "$EXIT_CLIENT" 'no matching clients found'
     jq --arg current "$CURRENT_CLIENT_MAC" \
@@ -1028,17 +1049,13 @@ select_client_from_candidates() {
         <<< "$candidates" > "$TMP_DIR/menu-clients.json"
 
     if [[ -t 0 && -t 2 ]] && command -v "$FZF_COMMAND" >/dev/null 2>&1; then
+        compute_client_widths 12
+        printf -v header "%-${CLIENT_NAME_WIDTH}s %-${CLIENT_IP_WIDTH}s %-${CLIENT_POLICY_WIDTH}s %-7s" \
+            'NAME' 'IP' 'POLICY' 'STATUS'
         selected=$(
-            jq -r --slurpfile policies "$TMP_DIR/policies.json" \
-                "to_entries[] | [
-                    (.key | tostring),
-                    (.value.name + (if .value.mac == \"$CURRENT_CLIENT_MAC\" then \" (this device)\" else \"\" end)),
-                    .value.ip,
-                    ($policy_label_filter),
-                    (if .value.online then \"online\" else \"offline\" end)
-                ] | @tsv" "$TMP_DIR/menu-clients.json" \
+            fzf_client_rows \
             | "$FZF_COMMAND" --delimiter=$'\t' --with-nth=2.. --height=70% --layout=reverse \
-                --prompt='Client> ' --header="$heading  Name | IP | Policy | Status"
+                --prompt='Client> ' --header="$heading"$'\n'"$header"
         ) || {
             unchanged 'No changes made.'
             return 1

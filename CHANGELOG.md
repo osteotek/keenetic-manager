@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.1 - 2026-09-13
+
+- Align name, IP, policy, and status columns in the interactive `fzf` client selector.
+
 ## 1.1.0 - 2026-09-13
 
 - Add bounded verification retries, dry-run plans, multi-client preflight, and rollback history.

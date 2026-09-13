@@ -1,3 +1,9 @@
+keenetic-policy (1.1.1-1) unstable; urgency=medium
+
+  * Align columns in the interactive client selector.
+
+ -- osteotek <osteotek@users.noreply.github.com>  Sun, 13 Sep 2026 00:00:00 +0000
+
 keenetic-policy (1.1.0-1) unstable; urgency=medium
 
   * Release Keenetic Policy CLI 1.1.0.

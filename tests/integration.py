@@ -295,7 +295,7 @@ def main():
             index = 1
 
             result = subprocess.run([str(SCRIPT), "--version"], cwd=ROOT, text=True, capture_output=True)
-            check(result.returncode == 0 and result.stdout.strip().endswith("1.1.0"), "version output")
+            check(result.returncode == 0 and result.stdout.strip().endswith("1.1.1"), "version output")
             report(index, "version output"); index += 1
 
             result = run(config)
@@ -412,12 +412,39 @@ def main():
 
             fake_fzf = temp / "fake-fzf"
             fzf_count = temp / "fzf-count"
-            fake_fzf.write_text("#!/usr/bin/env bash\ninput=$(cat)\ncount=0\n[[ ! -r $FZF_COUNT_FILE ]] || read -r count < \"$FZF_COUNT_FILE\"\nprintf '%s\\n' \"$((count + 1))\" > \"$FZF_COUNT_FILE\"\nprintf '%s\\n' \"${input%%$'\\n'*}\"\n")
+            fzf_capture = temp / "fzf-input"
+            fake_fzf.write_text(
+                "#!/usr/bin/env bash\n"
+                "input=$(cat)\n"
+                "count=0\n"
+                "[[ ! -r $FZF_COUNT_FILE ]] || read -r count < \"$FZF_COUNT_FILE\"\n"
+                "printf '%s\\n' \"$input\" > \"$FZF_CAPTURE_FILE.$count\"\n"
+                "printf '%s\\n' \"$((count + 1))\" > \"$FZF_COUNT_FILE\"\n"
+                "printf '%s\\n' \"${input%%$'\\n'*}\"\n"
+            )
             fake_fzf.chmod(0o700)
-            process, master = start_pty(config, "--interactive", extra_env={"KEENETIC_FZF": str(fake_fzf), "FZF_COUNT_FILE": str(fzf_count)})
+            process, master = start_pty(
+                config, "--interactive",
+                extra_env={
+                    "KEENETIC_FZF": str(fake_fzf),
+                    "FZF_COUNT_FILE": str(fzf_count),
+                    "FZF_CAPTURE_FILE": str(fzf_capture),
+                },
+            )
             finish_pty(process, master)
-            check(process.returncode == 0 and fzf_count.read_text().strip() == "2", "fzf was not used for both menus")
-            report(index, "fzf interactive client and policy search"); index += 1
+            check(process.returncode == 0 and fzf_count.read_text().strip() == "2",
+                  "fzf was not used for both menus")
+            client_rows = [line.split("\t", 1)[1] for line in Path(f"{fzf_capture}.0").read_text().splitlines()]
+            ip_columns = {row.index("192.0.2.") for row in client_rows}
+            policy_columns = {
+                min(position for label in ("Default", "Direct", "VPN")
+                    if (position := row.find(label)) >= 0)
+                for row in client_rows
+            }
+            status_columns = {row.rfind("online") for row in client_rows}
+            check(len(ip_columns) == len(policy_columns) == len(status_columns) == 1,
+                  "fzf client columns are not aligned")
+            report(index, "fzf interactive search with aligned columns"); index += 1
 
             native_env = {"KEENETIC_FZF": "keenetic-fzf-not-installed"}
             process, master = start_pty(config, "--all", "--interactive", columns=40, extra_env=native_env)
