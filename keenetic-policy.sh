@@ -697,11 +697,13 @@ list_clients_table() {
         "$name_separator" "$ip_separator" "$policy_separator"
     while IFS=$'\t' read -r name ip mac policy; do
         display_name=$name
-        [[ $mac != "$CURRENT_CLIENT_MAC" ]] || display_name="* $name (this device)"
+        if [[ -n $CURRENT_CLIENT_MAC && $mac == "$CURRENT_CLIENT_MAC" ]]; then
+            display_name="* $name (this device)"
+        fi
         fitted_name=$(shorten_text "$display_name" "$CLIENT_NAME_WIDTH")
         fitted_ip=$(shorten_text "$ip" "$CLIENT_IP_WIDTH")
         fitted_policy=$(shorten_text "$policy" "$CLIENT_POLICY_WIDTH")
-        if [[ $mac == "$CURRENT_CLIENT_MAC" ]]; then
+        if [[ -n $CURRENT_CLIENT_MAC && $mac == "$CURRENT_CLIENT_MAC" ]]; then
             printf "%s%-${CLIENT_NAME_WIDTH}s %-${CLIENT_IP_WIDTH}s %-${CLIENT_POLICY_WIDTH}s%s\n" \
                 "$GREEN" "$fitted_name" "$fitted_ip" "$fitted_policy" "$RESET"
         else
@@ -806,7 +808,7 @@ select_client_from_candidates() {
     MENU_CURRENT_INDEX=-1
     while IFS=$'\t' read -r name ip mac policy; do
         display_name=$name
-        if [[ $mac == "$CURRENT_CLIENT_MAC" ]]; then
+        if [[ -n $CURRENT_CLIENT_MAC && $mac == "$CURRENT_CLIENT_MAC" ]]; then
             display_name+=" (this device)"
             MENU_CURRENT_INDEX=$index
         fi
