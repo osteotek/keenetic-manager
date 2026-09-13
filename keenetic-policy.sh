@@ -547,7 +547,10 @@ init_config() {
     else
         config_dir=.
     fi
-    mkdir -p -m 700 -- "$config_dir"
+    if [[ ! -d $config_dir ]]; then
+        mkdir -p -- "$config_dir"
+        chmod 700 "$config_dir"
+    fi
     config_temp=$(mktemp "$config_dir/.keenetic-policy.XXXXXX")
     chmod 600 "$config_temp"
     {
@@ -665,6 +668,7 @@ separator() {
     printf '%s' "${value// /-}"
 }
 
+# shellcheck disable=SC2016 # The dollar expression belongs to jq.
 policy_label_filter='
     if .deny then
         "Blocked"
