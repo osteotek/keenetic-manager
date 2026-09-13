@@ -146,7 +146,9 @@ info() {
 }
 
 debug() {
-    $VERBOSE && printf 'Debug: %s\n' "$*" >&2 || true
+    if $VERBOSE; then
+        printf 'Debug: %s\n' "$*" >&2
+    fi
 }
 
 require_command() {

@@ -2,7 +2,7 @@ class KeeneticPolicy < Formula
   desc "Manage Keenetic client policies, Internet blocks, and Wake-on-LAN"
   homepage "https://github.com/osteotek/omarchy-keenetic"
   url "https://github.com/osteotek/omarchy-keenetic/releases/download/v1.1.0/keenetic-policy-1.1.0.tar.gz"
-  sha256 "fa0f657b808b49f7ae09b00e06ed6e6ea9b82f2a0fcc7485d38366a3dd79d73f"
+  sha256 "c80054569f5d58682c1caba3e15776a66f59ae71ce0e46f1a97a0e4a404e458e"
   license "MIT"
 
   depends_on "bash"
