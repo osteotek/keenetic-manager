@@ -4,7 +4,7 @@ Priority: optional
 Maintainer: osteotek <osteotek@users.noreply.github.com>
 Build-Depends: debhelper-compat (= 13)
 Standards-Version: 4.7.0
-Homepage: https://github.com/osteotek/omarchy-keenetic
+Homepage: https://github.com/osteotek/keenetic-policy
 Rules-Requires-Root: no
 
 Package: keenetic-policy

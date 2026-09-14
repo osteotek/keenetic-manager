@@ -1,3 +1,9 @@
+keenetic-policy (1.1.2-1) unstable; urgency=medium
+
+  * Rename the upstream project to keenetic-policy.
+
+ -- osteotek <osteotek@users.noreply.github.com>  Sun, 13 Sep 2026 00:00:00 +0000
+
 keenetic-policy (1.1.1-1) unstable; urgency=medium
 
   * Align columns in the interactive client selector.

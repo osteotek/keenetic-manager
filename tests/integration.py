@@ -295,7 +295,7 @@ def main():
             index = 1
 
             result = subprocess.run([str(SCRIPT), "--version"], cwd=ROOT, text=True, capture_output=True)
-            check(result.returncode == 0 and result.stdout.strip().endswith("1.1.1"), "version output")
+            check(result.returncode == 0 and result.stdout.strip().endswith("1.1.2"), "version output")
             report(index, "version output"); index += 1
 
             result = run(config)

@@ -18,8 +18,8 @@ A Bash CLI for listing Keenetic router clients and changing connection policies 
 From a checkout:
 
 ```bash
-git clone https://github.com/osteotek/omarchy-keenetic.git
-cd omarchy-keenetic
+git clone https://github.com/osteotek/keenetic-policy.git
+cd keenetic-policy
 make install
 keenetic-policy --init
 ```

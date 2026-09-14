@@ -1,8 +1,8 @@
 class KeeneticPolicy < Formula
   desc "Manage Keenetic client policies, Internet blocks, and Wake-on-LAN"
-  homepage "https://github.com/osteotek/omarchy-keenetic"
-  url "https://github.com/osteotek/omarchy-keenetic/releases/download/v1.1.1/keenetic-policy-1.1.1.tar.gz"
-  sha256 "ada3e52cf22d4e1626208538e3f5aeefa305877bd2db1a9bb46eba32c146d285"
+  homepage "https://github.com/osteotek/keenetic-policy"
+  url "https://github.com/osteotek/keenetic-policy/releases/download/v1.1.2/keenetic-policy-1.1.2.tar.gz"
+  sha256 "05c886cd0700676e4ce1b9aad7b6f07eae2c9ec3b8a4eba3567e55dfda1e4f90"
   license "MIT"
 
   depends_on "bash"
@@ -15,6 +15,6 @@ class KeeneticPolicy < Formula
   end
 
   test do
-    assert_match "keenetic-policy 1.1.1", shell_output("#{bin}/keenetic-policy --version")
+    assert_match "keenetic-policy 1.1.2", shell_output("#{bin}/keenetic-policy --version")
   end
 end

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.2 - 2026-09-13
+
+- Rename the project, local checkout, and GitHub repository to `keenetic-policy`.
+
 ## 1.1.1 - 2026-09-13
 
 - Align name, IP, policy, and status columns in the interactive `fzf` client selector.
