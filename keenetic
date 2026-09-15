@@ -776,7 +776,7 @@ cleanup() {
     if [[ -n $DIAG_ACTIVE_ENDPOINT && -n $TMP_DIR ]]; then
         (HTTP_TIMEOUT=3 http_request DELETE "$DIAG_ACTIVE_ENDPOINT" "$TMP_DIR/cancel.json") >/dev/null 2>&1 || true
     fi
-    $WATCH_SCREEN && printf '\033[?1049l' || true
+    if $WATCH_SCREEN; then printf '\033[?1049l' || true; fi
     show_cursor
     [[ -z ${TMP_DIR:-} ]] || rm -rf -- "$TMP_DIR"
 }

@@ -11,6 +11,6 @@ pkgbase = keenetic-manager
 	depends = coreutils
 	optdepends = fzf: searchable interactive menus
 	source = keenetic-manager-1.2.0.tar.gz::https://github.com/osteotek/keenetic-manager/releases/download/v1.2.0/keenetic-manager-1.2.0.tar.gz
-	sha256sums = a5f1182fa96a1fe819d8984faa59d762bb0acdde6c8114937ba67934e928dfb9
+	sha256sums = 731d3daa1e89cd9caa4face156d6dcd429d7b7ceb9ef864520d0d112aa2d2915
 
 pkgname = keenetic-manager
