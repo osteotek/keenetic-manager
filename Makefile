@@ -5,8 +5,9 @@ COMPLETIONDIR ?= $(PREFIX)/share/bash-completion/completions
 .PHONY: install uninstall check check-router release
 
 install:
-	install -Dm755 keenetic "$(DESTDIR)$(BINDIR)/keenetic"
-	install -Dm644 completions/keenetic.bash "$(DESTDIR)$(COMPLETIONDIR)/keenetic"
+	install -d "$(DESTDIR)$(BINDIR)" "$(DESTDIR)$(COMPLETIONDIR)"
+	install -m 755 keenetic "$(DESTDIR)$(BINDIR)/keenetic"
+	install -m 644 completions/keenetic.bash "$(DESTDIR)$(COMPLETIONDIR)/keenetic"
 
 uninstall:
 	rm -f "$(DESTDIR)$(BINDIR)/keenetic"

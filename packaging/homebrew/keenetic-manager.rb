@@ -1,8 +1,8 @@
 class KeeneticManager < Formula
   desc "Inspect Keenetic routers and manage client policies"
   homepage "https://github.com/osteotek/keenetic-manager"
-  url "https://github.com/osteotek/keenetic-manager/releases/download/v1.3.0/keenetic-manager-1.3.0.tar.gz"
-  sha256 "995bd559270737b150d6703079817a74a5e8e8a2cbc092511c6eca3db15b714a"
+  url "https://github.com/osteotek/keenetic-manager/releases/download/v1.3.1/keenetic-manager-1.3.1.tar.gz"
+  sha256 "f914cbfe780451905213145db2936a7db9226c96b7499af0b5fd60e2313ac34b"
   license "MIT"
 
   depends_on "bash"
@@ -15,6 +15,6 @@ class KeeneticManager < Formula
   end
 
   test do
-    assert_match "keenetic 1.3.0", shell_output("#{bin}/keenetic --version")
+    assert_match "keenetic 1.3.1", shell_output("#{bin}/keenetic --version")
   end
 end

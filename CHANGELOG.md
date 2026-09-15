@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.1 - 2026-09-15
+
+- Run on macOS: re-execute under Homebrew Bash when the system Bash is older than 4.3, fall back to `ifconfig` for local device detection, and use `route` for `--discover` when `ip` is unavailable.
+- Make `make install` work with BSD `install` on macOS by creating directories with `install -d` instead of GNU-only `-D`.
+- Make `make release` work on macOS by using GNU `gtar` and `gsha256sum` when installed, and refuse non-GNU tar so archives stay reproducible.
+- Make the regression suite portable to macOS by using the platform `TIOCSWINSZ` ioctl and `ifconfig` for the local MAC.
+
 ## 1.3.0 - 2026-09-15
 
 - Add WAN health with plain/encrypted DNS servers, global connection status, and reachability checks.

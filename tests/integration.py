@@ -12,6 +12,7 @@ import signal
 import ssl
 import stat
 import struct
+import termios
 import subprocess
 import unicodedata
 import tempfile
@@ -35,6 +36,14 @@ def local_mac():
         value = path.read_text().strip().lower()
         if value and value != "00:00:00:00:00:00":
             return value
+    try:  # macOS and BSD have no /sys/class/net; parse `ether` lines from ifconfig.
+        output = subprocess.run(["ifconfig"], capture_output=True, text=True, check=False).stdout
+    except OSError:
+        output = ""
+    for line in output.splitlines():
+        fields = line.split()
+        if len(fields) >= 2 and fields[0] == "ether" and fields[1].lower() != "00:00:00:00:00:00":
+            return fields[1].lower()
     return "02:00:00:00:00:01"
 
 
@@ -673,7 +682,7 @@ def start_pty(config, *args, columns=80, extra_env=None, subcommand="policy"):
 
 
 def termios_size(rows, columns):
-    return 0x5414, struct.pack("HHHH", rows, columns, 0, 0)
+    return termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0)
 
 
 def finish_pty(process, master):
@@ -742,7 +751,7 @@ def main():
             index = 1
 
             result = subprocess.run([str(SCRIPT), "--version"], cwd=ROOT, text=True, capture_output=True)
-            check(result.returncode == 0 and result.stdout.strip().endswith("1.3.0"), "version output")
+            check(result.returncode == 0 and result.stdout.strip().endswith("1.3.1"), "version output")
             report(index, "version output"); index += 1
 
             root_env = base_env(temp / "missing-config")
@@ -794,8 +803,8 @@ def main():
                 (["--help", "policy"], 0, "keenetic policy --interactive"),
                 (["--verbose", "wake", "--help"], 0, "wake SELECTOR"),
                 (["--help", "wake"], 0, "wake SELECTOR"),
-                (["--version", "policy"], 0, "keenetic 1.3.0"),
-                (["wake", "--version"], 0, "keenetic 1.3.0"),
+                (["--version", "policy"], 0, "keenetic 1.3.1"),
+                (["wake", "--version"], 0, "keenetic 1.3.1"),
                 (["wake"], 2, "requires at least one"),
                 (["wake", "--json"], 2, "unknown option for wake"),
                 (["wake", "--policy", "VPN"], 2, "unknown option for wake"),

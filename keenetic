@@ -2,8 +2,25 @@
 
 set -Eeuo pipefail
 
+# Bash 4.3+ is required. macOS ships Bash 3.2, so re-exec under a newer Bash
+# when one is installed, and fail with a clear message otherwise. This block
+# must stay free of Bash 4 syntax so that Bash 3.2 can parse it.
+if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 3) )); then
+    if [[ -z ${KEENETIC_BASH_REEXEC:-} ]]; then
+        for candidate in /opt/homebrew/bin/bash /usr/local/bin/bash /home/linuxbrew/.linuxbrew/bin/bash; do
+            if [[ -x $candidate ]] && "$candidate" -c '(( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 3) ))' 2>/dev/null; then
+                KEENETIC_BASH_REEXEC=1 exec "$candidate" "$0" "$@"
+            fi
+        done
+    fi
+    printf '%s: Bash 4.3 or newer is required, but this is Bash %s.\n' "${0##*/}" "$BASH_VERSION" >&2
+    printf 'On macOS, install a newer Bash with: brew install bash\n' >&2
+    exit 1
+fi
+unset KEENETIC_BASH_REEXEC
+
 PROGRAM=${0##*/}
-VERSION=1.3.0
+VERSION=1.3.1
 EXIT_GENERAL=1
 EXIT_USAGE=2
 EXIT_CLIENT=3
@@ -1043,14 +1060,23 @@ prompt_value() {
     printf '%s' "${value:-$default}"
 }
 
+default_gateway() {
+    if command -v ip >/dev/null 2>&1; then
+        ip -json route show default \
+            | jq -r '[.[] | select(.gateway != null)] | sort_by(.metric // 0) | .[0].gateway // empty'
+    elif command -v route >/dev/null 2>&1; then
+        # macOS and BSD: `route -n get default` prints a `gateway: ADDRESS` line.
+        route -n get default 2>/dev/null | awk '$1 == "gateway:" { print $2; exit }'
+    else
+        fail 'neither ip nor route is available to find the default gateway'
+    fi
+}
+
 discover_router() {
     local gateway url status
-    require_command ip
     require_command jq
     require_command curl
-    gateway=$(ip -json route show default \
-        | jq -r '[.[] | select(.gateway != null)] | sort_by(.metric // 0) | .[0].gateway // empty') \
-        || fail 'cannot inspect the default route'
+    gateway=$(default_gateway) || fail 'cannot inspect the default route'
     [[ -n $gateway ]] || fail 'no default gateway was found'
     if [[ $gateway == *:* ]]; then
         url=http://[$gateway]
@@ -1697,8 +1723,22 @@ fetch_router_state() {
     debug "Policies: $(jq '[to_entries[] | select(.value.description? != null)] | length' "$TMP_DIR/policies.json")"
 }
 
-detect_current_client() {
+list_local_macs() {
     local address_file local_mac
+    if [[ -d /sys/class/net ]]; then
+        for address_file in /sys/class/net/*/address; do
+            [[ -r $address_file ]] || continue
+            IFS= read -r local_mac < "$address_file" || continue
+            printf '%s\n' "${local_mac,,}"
+        done
+    elif command -v ifconfig >/dev/null 2>&1; then
+        # macOS and BSD: `ether xx:xx:xx:xx:xx:xx` lines from ifconfig.
+        ifconfig 2>/dev/null | awk '$1 == "ether" { print tolower($2) }'
+    fi
+}
+
+detect_current_client() {
+    local local_mac
     CURRENT_CLIENT_MAC=
     if [[ -n $ROUTER_LOCAL_IP ]]; then
         CURRENT_CLIENT_MAC=$(jq -r --arg ip "$ROUTER_LOCAL_IP" \
@@ -1706,16 +1746,13 @@ detect_current_client() {
     fi
     [[ -z $CURRENT_CLIENT_MAC ]] || return 0
 
-    for address_file in /sys/class/net/*/address; do
-        [[ -r $address_file ]] || continue
-        IFS= read -r local_mac < "$address_file" || continue
-        local_mac=${local_mac,,}
-        [[ $local_mac != 00:00:00:00:00:00 ]] || continue
+    while IFS= read -r local_mac; do
+        [[ -n $local_mac && $local_mac != 00:00:00:00:00:00 ]] || continue
         if jq -e --arg mac "$local_mac" 'any(.[]; .mac == $mac)' "$TMP_DIR/connected.json" >/dev/null; then
             CURRENT_CLIENT_MAC=$local_mac
             return 0
         fi
-    done
+    done < <(list_local_macs)
 }
 
 terminal_columns() {

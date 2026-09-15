@@ -6,7 +6,7 @@ A Bash CLI for Keenetic router status, clients, Wi-Fi, traffic, VPN diagnostics,
 
 ## Requirements
 
-- Bash 4.3 or newer
+- Bash 4.3 or newer (macOS ships Bash 3.2; run `brew install bash` and `keenetic` re-executes under it automatically)
 - `curl`
 - `jq` 1.6 or newer
 - `md5sum` and `sha256sum`, or the macOS `md5` and `shasum` equivalents

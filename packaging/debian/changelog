@@ -1,3 +1,11 @@
+keenetic-manager (1.3.1-1) unstable; urgency=medium
+
+  * Run on macOS: re-exec under a newer Bash, and fall back to ifconfig and route.
+  * Make make install and the regression suite portable to BSD/macOS tools.
+  * Make the release script use GNU tar and sha256sum when available.
+
+ -- osteotek <osteotek@users.noreply.github.com>  Tue, 15 Sep 2026 00:00:00 +0000
+
 keenetic-manager (1.3.0-1) unstable; urgency=medium
 
   * Add WAN, DHCP, routing, mesh, NAT, and forwarding views.
