@@ -145,6 +145,114 @@ The command reads `/rci/show/ip/hotspot/summary` with `attribute=sumbytes`, the 
 
 JSON contains `router`, `period`, `window_seconds`, `limit`, and a ranked `clients` array. Each client has `rank`, `name`, `mac`, `ip`, `online`, `rx_bytes`, `tx_bytes`, and `total_bytes`. `online` reflects current local or mesh links and is null when unknown. Missing addresses or directional counters are null; full names and exact byte totals are preserved regardless of terminal width.
 
+## WAN health
+
+```bash
+keenetic wan
+keenetic wan --watch 5
+keenetic wan --json
+```
+
+Shows Internet reachability, the last check time, active gateway/interface, global connection priorities and states, DNS servers, and ping-check results. `active` identifies the reported gateway interface or an interface marked as a default gateway; other global interfaces are `alternate`. This is the router's global connection view, rather than a prediction of which interface every client policy will use. DNS entries include plain, TLS, and HTTPS servers when available. HTTPS URLs are reduced to hostnames, excluding credentials, paths, and query parameters.
+
+## Interface details and rates
+
+```bash
+keenetic interfaces inspect GigabitEthernet1
+keenetic interfaces inspect Wireguard0 --json
+keenetic interfaces --rates
+keenetic interfaces --rates --sample 2 --watch 2
+keenetic interfaces --rates --all --json
+```
+
+Inspection includes inactive interfaces and requires an exact interface ID. It adds MAC, MTU, priority, default gateways, uptime, Ethernet speed/duplex and physical port details where reported, plus packet/error/drop counters. Missing values remain unknown. IPv6 gateway data is optional; an unsupported IPv6 endpoint does not discard IPv4 results.
+
+`--rates` samples cumulative counters twice, waiting one second initially (`--sample` accepts 1–60 seconds). RX/TX speeds use the actual elapsed interval, measured in whole seconds, and are relative to the router interface. Text displays decimal Mbps; JSON preserves bytes per second, the sample interval, and up to 20 samples per direction. Its `sampled_at` value is elapsed seconds since this CLI process started. With `--watch`, subsequent frames use the previous frame's counters and keep a small history in memory/temp files for that session. The graph scales to each direction's own recent maximum. Counter decreases, newly appearing interfaces, and changes in state/address produce unknown rates and reset that interface's history. `--rates` cannot be combined with inspection or interactive control.
+
+## DHCP leases
+
+```bash
+keenetic dhcp
+keenetic dhcp --watch 5 --json
+```
+
+Lists IP/MAC mappings, device names, lease expiry, and static/dynamic assignments. Static assignments are matched against configured reservations, including reservations without a current lease. A lease's presence does not establish that its device is online. Infinite leases have `infinite: true` and a null expiry in JSON.
+
+## Routing table
+
+```bash
+keenetic routes
+keenetic routes --json
+```
+
+Shows IPv4 and IPv6 destinations, gateways, outgoing interfaces, metrics, flags, and protocols. JSON also includes rejecting, floating, and static flags. If IPv6 routing is unavailable, `ipv6_available` is false and IPv4 routes remain visible. These commands inspect the existing IP routing table.
+
+## Mesh topology
+
+```bash
+keenetic mesh
+keenetic mesh --watch 5 --json
+```
+
+Shows mesh members, IP addresses, client counts, backhaul uplinks, parent bridge IDs, signal levels, and controller update settings. JSON also includes firmware, uptime, root bridge ID, backhaul TX rate, and Internet availability. Parent/root values retain the router's bridge identifiers. `responding` means the member reports zero RCI errors; `API errors` reports nonzero errors. Missing status remains unknown. An empty member inventory is valid, including the `{}` response used by routers without extenders.
+
+## Wi-Fi client details and surveys
+
+```bash
+keenetic wifi clients
+keenetic wifi clients --watch 2 --json
+keenetic wifi scan
+keenetic wifi scan --radio WifiMaster1 --json
+```
+
+`wifi clients` lists associated stations with access point, RSSI, TX link rate, Wi-Fi standard, channel width, and spatial streams. JSON adds RX link rate when available, MCS, security, authentication state, connection uptime, and byte counters. Device names/IPs are supplementary; unavailable inventory does not discard station telemetry.
+
+`wifi scan` surveys nearby networks and shows SSID, BSSID, radio, channel, signal, and security. Hidden SSIDs are retained. It surveys enabled radios by default; `--all` includes disabled radios, and `--radio ID` selects one exact radio. A scan may briefly affect Wi-Fi traffic, and `--watch` is unavailable for scans. Survey responses are whitelisted and exclude keys/passwords.
+
+## Active connections and port forwarding
+
+```bash
+keenetic connections
+keenetic connections --client Laptop --watch 2
+keenetic connections --client 192.168.1.10 --json
+keenetic forwards
+keenetic forwards --json
+```
+
+`connections` shows the router's live NAT table, with source/destination addresses and ports, protocol, and directional counters. The optional client selector searches known clients by name, IP, or MAC, including offline clients; ambiguous names require an IP or MAC. Filtering matches original and translated addresses in both directions. JSON preserves translated addresses/ports and packet counters. The NAT table is not a complete list of every LAN or IPv6 connection.
+
+`forwards` lists configured static forwarding rules, including external port ranges, target host/port, interface, protocol, comment, and enabled state. These are configured rules, independent of whether a corresponding live NAT connection exists.
+
+## Router throughput test
+
+```bash
+keenetic speedtest --server 192.168.1.10
+keenetic speedtest --server 192.168.1.10 --reverse --duration 15
+keenetic speedtest --server example.net --port 5202 --interface Wireguard0 --json
+keenetic speedtest --server 192.168.1.10 --dry-run
+```
+
+The target must run an iPerf3 server. This tests TCP throughput from the router to the chosen server; `--reverse` measures server-to-router download. Defaults are port 5201 and ten seconds, with a duration range of 1–30 seconds. IPv6 literals select IPv6. `--interface` selects an existing router interface, while `--dry-run` previews the request without starting traffic. No public test server is selected automatically.
+
+The command polls the router's iPerf3 tool and cancels it on interruption or polling failure, using the same bounded lifecycle as `diagnose`. It cannot be watched. JSON includes server, direction, duration, and the tool's output lines. `completed` means the tool finished; examine the output for throughput results or errors.
+
+## Client names and configuration persistence
+
+```bash
+keenetic clients rename Laptop "Work laptop" --dry-run
+keenetic clients rename 192.168.1.10 "Work laptop"
+keenetic system changes
+keenetic system changes --watch 2 --json
+keenetic system save --dry-run
+keenetic system save
+```
+
+Rename resolves one client by name/IP/MAC, sends a structured name update, and verifies the name by MAC with up to four reads. Names may contain spaces and Unicode; control characters and names longer than 255 characters are rejected. An unchanged name produces no write. Rename affects the running configuration; use `system save` to persist it.
+
+`system changes` reports the last change's date, agent/user, unsaved flag, and fail-safe status. `system save` sends one save request and verifies that `unsaved` becomes false, with up to four checks over three seconds. An already-saved configuration produces no write. If save state is unavailable, it fails rather than claiming persistence. Saving persists all currently pending router configuration changes. Rename and save support `--dry-run` and `--quiet`; they reject `--watch` and `--json`.
+
+The status, mesh, station, route, and iPerf3 schemas follow the [RCI request reference](https://docs.rs/keenetic-rci/latest/keenetic_rci/request/index.html). Survey and forwarding requests are also documented in the [network](https://github.com/st412m/keenetic-mcp/blob/main/tools_network.py) and [configuration](https://github.com/st412m/keenetic-mcp/blob/main/tools_config.py) implementations. Configuration persistence and rename verification follow these [RCI notes](https://github.com/salatmaster/keenetic-mcp/blob/main/docs/rci-api.md#configuration-persistence). Endpoint availability varies with firmware and installed components.
+
 ## Live views
 
 Add `--watch SECONDS` to a read-only view to refresh it in place:
@@ -183,6 +291,20 @@ keenetic system --json
 ```
 
 Shows model, firmware, hostname, uptime, CPU load, RAM, swap, and connection-table usage from `show system` and `show version`. The router's memory counters are KiB and are converted to bytes in JSON. Used RAM follows the router's reported `memory` value. Unavailable firmware metadata produces a warning while preserving health data.
+
+### Reboot
+
+```bash
+keenetic system reboot
+keenetic system reboot --dry-run
+keenetic --router home system reboot
+```
+
+Reboot requests an immediate restart of the selected router, interrupting network access. `--dry-run` authenticates and previews the target without sending the reboot request. `--quiet` suppresses the success message. Reboot rejects `--watch` and `--json`.
+
+The command sends one structured RCI `system reboot` request and checks the response for errors. It does not retry or wait for the router to come back. If the connection closes before a response arrives, it reports an uncertain outcome with a nonzero exit code; the router may already be rebooting. It does not explicitly save pending configuration changes before restarting.
+
+See the [Keenetic CLI reboot command](https://support.keenetic.com/explorer/kn-1613/en/18480-command-line-interface--cli-.html) and [RCI reboot request implementation](https://github.com/st412m/keenetic-mcp/blob/main/tools_system.py).
 
 ## VPN peers
 

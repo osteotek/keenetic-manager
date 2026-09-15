@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 
 PROGRAM=${0##*/}
-VERSION=1.2.0
+VERSION=1.3.0
 EXIT_GENERAL=1
 EXIT_USAGE=2
 EXIT_CLIENT=3
@@ -37,6 +37,15 @@ VIEW_MODE=connected
 TRAFFIC_TOP=5
 TRAFFIC_PERIOD=3m
 SUBCOMMAND=
+NEW_CLIENT_NAME=
+INTERFACE_RATES=false
+RATE_INTERVAL=1
+RATE_SAMPLE_SET=false
+SPEED_SERVER=
+SPEED_PORT=5201
+SPEED_DURATION=10
+SPEED_REVERSE=false
+SCAN_RADIO=
 INSPECT_QUERY=
 WATCH_INTERVAL=
 WATCH_SCREEN=false
@@ -93,9 +102,13 @@ Usage:
   $PROGRAM [GLOBAL OPTIONS] wifi [--all] [--json]
   $PROGRAM [GLOBAL OPTIONS] clients [inspect NAME|IP|MAC] [OPTIONS]
   $PROGRAM [GLOBAL OPTIONS] system [--json]
+  $PROGRAM [GLOBAL OPTIONS] system reboot [--dry-run]
   $PROGRAM [GLOBAL OPTIONS] vpn peers [--json]
   $PROGRAM [GLOBAL OPTIONS] diagnose HOST [--interface ID] [--json]
   $PROGRAM [GLOBAL OPTIONS] logs [--limit N] [--filter TEXT] [--json]
+  $PROGRAM [GLOBAL OPTIONS] wan|dhcp|routes|mesh|forwards [--json] [--watch SECONDS]
+  $PROGRAM [GLOBAL OPTIONS] connections [--client NAME|IP|MAC] [--json]
+  $PROGRAM [GLOBAL OPTIONS] speedtest --server HOST [OPTIONS]
   $PROGRAM [GLOBAL OPTIONS] wake SELECTOR... [--dry-run]
   $PROGRAM --init [--router NAME] [--ca-file FILE|--insecure]
   $PROGRAM --discover
@@ -104,15 +117,22 @@ Usage:
 
 Commands:
   (none)      Show KeenDNS, connected clients, interfaces, IP addresses, and traffic totals
-  interfaces  List interfaces and interactively connect or disconnect them
+  interfaces  Inspect interfaces, sample rates, or connect/disconnect them
   traffic     Rank clients by recent traffic (default: top five, last three minutes)
   wifi        Show the router's Wi-Fi networks, radios, security, and client counts
-  clients     List clients or inspect connection, policy, and recent traffic details
-  system      Show model, firmware, uptime, CPU, and memory
+  clients     List, inspect, or rename clients
+  system      Show health/changes, save configuration, or reboot
   vpn         Show WireGuard peer endpoints, handshakes, and counters
   diagnose    Run router-side ping/traceroute and show relevant recent logs
   logs        Show recent router logs, with optional text filtering
   policy      List clients and manage connection policies and Internet blocks
+  wan         Show Internet health, connections, and DNS servers
+  dhcp        Show DHCP leases and static reservations
+  routes      Show IPv4 and IPv6 routes
+  mesh        Show mesh nodes and backhaul links
+  connections Show active NAT connections, optionally filtered by client
+  forwards    Show configured port-forwarding rules
+  speedtest   Run a bounded router-side iPerf3 throughput test
   wake        Send Wake-on-LAN to known clients, including offline clients
 
 Setup and discovery:
@@ -146,6 +166,8 @@ wifi_usage() {
 Usage:
   $PROGRAM wifi [--all] [--json]
   $PROGRAM wifi monitor [--json] [--watch SECONDS]
+  $PROGRAM wifi clients [--json] [--watch SECONDS]
+  $PROGRAM wifi scan [--radio ID] [--all] [--json]
 
 List the router's Wi-Fi access-point networks with SSID, band, channel,
 channel width, security, connected-client count, and status.
@@ -155,7 +177,9 @@ channel width, security, connected-client count, and status.
 
 Each access point is listed separately, including networks sharing an SSID
 across radio bands. Missing information is shown as - or unknown. This command
-reads the router's own networks; it does not scan for neighbouring networks.
+lists its own networks by default. 'wifi clients' shows station link details;
+'wifi scan' surveys nearby networks and cannot be watched. Scans may briefly
+affect Wi-Fi traffic.
 Global options work before or after wifi. Run '$PROGRAM --help' for details.
 EOF
 }
@@ -184,7 +208,11 @@ interfaces_usage() {
 Usage:
   $PROGRAM interfaces [--all] [--json]
   $PROGRAM interfaces --interactive [--dry-run]
+  $PROGRAM interfaces inspect ID [--json] [--watch SECONDS]
+  $PROGRAM interfaces --rates [--sample SECONDS] [--all] [--json] [--watch SECONDS]
 
+      --rates                    Show sampled RX/TX rates and recent graphs
+      --sample SECONDS           Initial rate sample interval (1–60; default: 1)
       --all                      Include inactive interfaces in the listing
       --json                     Emit router address and interface data as JSON
       --watch SECONDS             Refresh the interface listing
@@ -240,9 +268,20 @@ EOF
 }
 read_command_usage() {
     case $COMMAND in
+        wan|dhcp|routes|mesh|forwards)
+            printf 'Usage:\n  %s %s [--json] [--watch SECONDS]\n\n' "$PROGRAM" "$COMMAND"
+            case $COMMAND in
+                wan) printf 'Internet reachability, global connections, DNS, and connection checks.\n' ;;
+                dhcp) printf 'Current leases and configured static DHCP reservations.\n' ;;
+                routes) printf 'IPv4 and IPv6 routes, gateways, metrics, and protocols.\n' ;;
+                mesh) printf 'Mesh nodes, backhaul links, client counts, and controller status.\n' ;;
+                forwards) printf 'Configured port-forwarding rules and enabled state.\n' ;;
+            esac ;;
+        connections) printf 'Usage:\n  %s connections [--client NAME|IP|MAC] [--json] [--watch SECONDS]\n\nShow active NAT connections; --client matches either direction, including translated addresses.\n' "$PROGRAM" ;;
+        speedtest) printf 'Usage:\n  %s speedtest --server HOST [--port PORT] [--duration SECONDS] [--reverse]\n      [--interface ID] [--json|--dry-run]\n\nRun TCP iPerf3 from the router to your server. Default: port 5201, 10 seconds, upload.\n--reverse measures download; duration must be 1–30 seconds. The server must run iPerf3.\nCtrl-C cancels the active test. Completed output does not guarantee a successful transfer.\n' "$PROGRAM" ;;
         clients)
-            printf 'Usage:\n  %s clients [--all|--offline] [--json] [--watch SECONDS]\n  %s clients inspect NAME|IP|MAC [--json] [--watch SECONDS]\n\nInspection includes offline clients. Use an IP or MAC to distinguish duplicate names.\n' "$PROGRAM" "$PROGRAM" ;;
-        system) printf 'Usage:\n  %s system [--json] [--watch SECONDS]\n\nShow model, firmware, uptime, CPU, RAM, swap, and connection counts.\n' "$PROGRAM" ;;
+            printf 'Usage:\n  %s clients [--all|--offline] [--json] [--watch SECONDS]\n  %s clients inspect NAME|IP|MAC [--json] [--watch SECONDS]\n  %s clients rename NAME|IP|MAC NEW_NAME [--dry-run]\n\nInspection includes offline clients. Use an IP or MAC to distinguish duplicate names.\nRenaming verifies the running name. Use system save to persist it.\n' "$PROGRAM" "$PROGRAM" "$PROGRAM" ;;
+        system) printf 'Usage:\n  %s system [--json] [--watch SECONDS]\n  %s system reboot [--dry-run]\n  %s system changes [--json] [--watch SECONDS]\n  %s system save [--dry-run]\n\nShow model, firmware, uptime, CPU, RAM, swap, and connection counts.\nReboot requests an immediate router restart and interrupts network access.\nUse --dry-run to preview it. Reboot and save cannot be combined with --watch or --json.\nSave persists the current running configuration and verifies the unsaved flag clears.\n' "$PROGRAM" "$PROGRAM" "$PROGRAM" "$PROGRAM" ;;
         vpn) printf 'Usage:\n  %s vpn peers [--json] [--watch SECONDS]\n\nShow WireGuard peer endpoints, handshake age, online state, and cumulative RX/TX.\n' "$PROGRAM" ;;
         diagnose) printf 'Usage:\n  %s diagnose HOST [--interface ID] [--json]\n\nRun four router-side pings and a bounded traceroute (12 hops), then show relevant\nrecent logs. Each test is limited to 60 seconds. Ctrl-C cancels the active test.\nCompletion means the tests ran; inspect their output for packet loss or failure.\n' "$PROGRAM" ;;
         logs) printf 'Usage:\n  %s logs [--limit N] [--filter TEXT] [--json] [--watch SECONDS]\n\nRead the latest 20 log entries by default (maximum 1000). Filtering is literal\nand case-insensitive within those entries. Watch refreshes this view.\n' "$PROGRAM" ;;
@@ -336,20 +375,29 @@ parse_args() {
     while (($#)); do
         if [[ $scope == root ]]; then
             case $1 in
-                policy|wake|interfaces|traffic|wifi|clients|system|vpn|diagnose|logs|--watch|--watch=*|--all|--json|--init|--discover|--router|--router=*|--ca-file|--ca-file=*|--insecure|-q|--quiet|-v|--verbose|--color|--color=*|--no-color|-h|--help|-V|--version) ;;
+                policy|wake|interfaces|traffic|wifi|clients|system|vpn|diagnose|logs|wan|dhcp|routes|mesh|speedtest|connections|forwards|--watch|--watch=*|--all|--json|--init|--discover|--router|--router=*|--ca-file|--ca-file=*|--insecure|-q|--quiet|-v|--verbose|--color|--color=*|--no-color|-h|--help|-V|--version) ;;
                 *) fail "$EXIT_USAGE" "unknown command or option: $1. Run '$PROGRAM --help'." ;;
+            esac
+        elif [[ $scope == wan || $scope == dhcp || $scope == routes || $scope == mesh || $scope == connections || $scope == forwards || $scope == speedtest ]]; then
+            case $1 in
+                --json|--watch|--watch=*|--router|--router=*|--ca-file|--ca-file=*|--insecure|-q|--quiet|-v|--verbose|--color|--color=*|--no-color|-h|--help|-V|--version) ;;
+                --client|--client=*) [[ $scope == connections ]] || fail "$EXIT_USAGE" '--client is only valid for connections' ;;
+                --server|--server=*|--port|--port=*|--duration|--duration=*|--reverse|--interface|--interface=*|--dry-run)
+                    [[ $scope == speedtest ]] || fail "$EXIT_USAGE" "$1 is only valid for speedtest" ;;
+                *) fail "$EXIT_USAGE" "unknown option for $scope: $1" ;;
             esac
         elif [[ $scope == clients || $scope == system || $scope == vpn || $scope == diagnose || $scope == logs ]]; then
             case $1 in
                 --json|--watch|--watch=*|--router|--router=*|--ca-file|--ca-file=*|--insecure|-q|--quiet|-v|--verbose|--color|--color=*|--no-color|-h|--help|-V|--version|--) ;;
+                --dry-run) [[ $scope == system || $scope == clients ]] || fail "$EXIT_USAGE" "$1 is only valid for system actions or clients rename" ;;
                 --all|--offline) [[ $scope == clients ]] || fail "$EXIT_USAGE" "$1 is only valid for client listings" ;;
-                --interface|--interface=*) [[ $scope == diagnose ]] || fail "$EXIT_USAGE" "$1 is only valid for diagnose" ;;
+                --interface|--interface=*) [[ $scope == diagnose || $scope == speedtest ]] || fail "$EXIT_USAGE" "$1 is only valid for diagnose" ;;
                 --limit|--limit=*|--filter|--filter=*) [[ $scope == logs ]] || fail "$EXIT_USAGE" "$1 is only valid for logs" ;;
                 -*) fail "$EXIT_USAGE" "unknown option for $scope: $1" ;;
             esac
         elif [[ $scope == wifi ]]; then
             case $1 in
-                monitor|--watch|--watch=*|--all|--json|--router|--router=*|--ca-file|--ca-file=*|--insecure|-q|--quiet|-v|--verbose|--color|--color=*|--no-color|-h|--help|-V|--version) ;;
+                monitor|clients|scan|--radio|--radio=*|--watch|--watch=*|--all|--json|--router|--router=*|--ca-file|--ca-file=*|--insecure|-q|--quiet|-v|--verbose|--color|--color=*|--no-color|-h|--help|-V|--version) ;;
                 *) fail "$EXIT_USAGE" "unknown option for wifi: $1. Run '$PROGRAM wifi --help'." ;;
             esac
         elif [[ $scope == traffic ]]; then
@@ -359,8 +407,8 @@ parse_args() {
             esac
         elif [[ $scope == interfaces ]]; then
             case $1 in
-                --watch|--watch=*|--all|--json|-i|--interactive|--dry-run|--router|--router=*|--ca-file|--ca-file=*|--insecure|-q|--quiet|-v|--verbose|--color|--color=*|--no-color|-h|--help|-V|--version) ;;
-                *) fail "$EXIT_USAGE" "unknown option for interfaces: $1. Run '$PROGRAM interfaces --help'." ;;
+                inspect|--rates|--sample|--sample=*|--watch|--watch=*|--all|--json|-i|--interactive|--dry-run|--router|--router=*|--ca-file|--ca-file=*|--insecure|-q|--quiet|-v|--verbose|--color|--color=*|--no-color|-h|--help|-V|--version) ;;
+                -*) fail "$EXIT_USAGE" "unknown option for interfaces: $1. Run '$PROGRAM interfaces --help'." ;;
             esac
         elif [[ $scope == wake ]]; then
             case $1 in
@@ -369,7 +417,7 @@ parse_args() {
             esac
         fi
         case $1 in
-            policy|wake|interfaces|traffic|wifi|clients|system|vpn|diagnose|logs)
+            policy|wake|interfaces|traffic|wifi|clients|system|vpn|diagnose|logs|wan|dhcp|routes|mesh|speedtest|connections|forwards)
                 if [[ $scope == root ]]; then
                     $INIT_CONFIG || $DISCOVER \
                         && fail "$EXIT_USAGE" '--init and --discover cannot be combined with a subcommand'
@@ -389,11 +437,36 @@ parse_args() {
             -i|--interactive)
                 INTERACTIVE=true
                 ;;
+            --rates) [[ $scope == interfaces ]] || fail "$EXIT_USAGE" '--rates is only valid for interfaces'; INTERFACE_RATES=true ;;
+            --reverse) [[ $scope == speedtest ]] || fail "$EXIT_USAGE" '--reverse is only valid for speedtest'; SPEED_REVERSE=true ;;
+            --server|--port|--duration|--sample|--radio)
+                case $scope:$1 in
+                    speedtest:--server|speedtest:--port|speedtest:--duration|interfaces:--sample|wifi:--radio) ;;
+                    *) fail "$EXIT_USAGE" "$1 is not valid for $scope" ;;
+                esac
+                if ! { (($# >= 2)) && [[ -n $2 ]]; }; then
+                    fail "$EXIT_USAGE" "$1 requires a value"
+                fi
+                case $1 in
+                    --server) SPEED_SERVER=$2 ;; --port) SPEED_PORT=$2 ;; --duration) SPEED_DURATION=$2 ;;
+                    --sample) RATE_INTERVAL=$2; RATE_SAMPLE_SET=true ;; --radio) SCAN_RADIO=$2 ;;
+                esac
+                shift ;;
+            --server=*|--port=*|--duration=*|--sample=*|--radio=*)
+                case $scope:${1%%=*} in
+                    speedtest:--server|speedtest:--port|speedtest:--duration|interfaces:--sample|wifi:--radio) ;;
+                    *) fail "$EXIT_USAGE" "${1%%=*} is not valid for $scope" ;;
+                esac
+                [[ -n ${1#*=} ]] || fail "$EXIT_USAGE" "${1%%=*} requires a value"
+                case $1 in
+                    --server=*) SPEED_SERVER=${1#*=} ;; --port=*) SPEED_PORT=${1#*=} ;; --duration=*) SPEED_DURATION=${1#*=} ;;
+                    --sample=*) RATE_INTERVAL=${1#*=}; RATE_SAMPLE_SET=true ;; --radio=*) SCAN_RADIO=${1#*=} ;;
+                esac ;;
             --watch|--interface|--limit|--filter)
                 (($# >= 2)) || fail "$EXIT_USAGE" "$1 requires a value"
                 case $1 in
                     --watch) WATCH_INTERVAL=$2 ;;
-                    --interface) [[ $scope == diagnose ]] || fail "$EXIT_USAGE" '--interface is only valid for diagnose'; DIAG_INTERFACE=$2 ;;
+                    --interface) [[ $scope == diagnose || $scope == speedtest ]] || fail "$EXIT_USAGE" '--interface is only valid for diagnose or speedtest'; DIAG_INTERFACE=$2 ;;
                     --limit) [[ $scope == logs ]] || fail "$EXIT_USAGE" '--limit is only valid for logs'; LOG_LIMIT=$2 ;;
                     --filter) [[ $scope == logs ]] || fail "$EXIT_USAGE" '--filter is only valid for logs'; LOG_FILTER=$2 ;;
                 esac
@@ -404,7 +477,7 @@ parse_args() {
                 [[ -n ${1#*=} ]] || fail "$EXIT_USAGE" "${1%%=*} requires a non-empty value"
                 case $1 in
                     --watch=*) WATCH_INTERVAL=${1#*=} ;;
-                    --interface=*) [[ $scope == diagnose ]] || fail "$EXIT_USAGE" '--interface is only valid for diagnose'; DIAG_INTERFACE=${1#*=} ;;
+                    --interface=*) [[ $scope == diagnose || $scope == speedtest ]] || fail "$EXIT_USAGE" '--interface is only valid for diagnose or speedtest'; DIAG_INTERFACE=${1#*=} ;;
                     --limit=*) [[ $scope == logs ]] || fail "$EXIT_USAGE" '--limit is only valid for logs'; LOG_LIMIT=${1#*=} ;;
                     --filter=*) [[ $scope == logs ]] || fail "$EXIT_USAGE" '--filter is only valid for logs'; LOG_FILTER=${1#*=} ;;
                 esac
@@ -421,12 +494,18 @@ parse_args() {
                 ;;
             --client|--ip|--mac)
                 (($# >= 2)) || fail "$EXIT_USAGE" "$1 requires a value"
-                add_client_selector "${1#--}" "$2"
+                if [[ $scope == connections ]]; then
+                    [[ -z $INSPECT_QUERY && -n $2 ]] || fail "$EXIT_USAGE" 'connections accepts one non-empty --client'
+                    INSPECT_QUERY=$2
+                else add_client_selector "${1#--}" "$2"; fi
                 shift
                 ;;
             --client=*|--ip=*|--mac=*)
                 selector=${1%%=*}
-                add_client_selector "${selector#--}" "${1#*=}"
+                if [[ $scope == connections ]]; then
+                    [[ -z $INSPECT_QUERY && -n ${1#*=} ]] || fail "$EXIT_USAGE" 'connections accepts one non-empty --client'
+                    INSPECT_QUERY=${1#*=}
+                else add_client_selector "${selector#--}" "${1#*=}"; fi
                 ;;
             --policy)
                 (($# >= 2)) || fail "$EXIT_USAGE" '--policy requires an ID or description'
@@ -538,7 +617,7 @@ parse_args() {
             interfaces) interfaces_usage ;;
             traffic) traffic_usage ;;
             wifi) wifi_usage ;;
-            clients|system|vpn|diagnose|logs) read_command_usage ;;
+            clients|system|vpn|diagnose|logs|wan|dhcp|routes|mesh|speedtest|connections|forwards) read_command_usage ;;
             wake) wake_usage ;;
         esac
         exit 0
@@ -556,14 +635,22 @@ parse_args() {
             *) fail "$EXIT_USAGE" '--period must be 3m, 1h, 3h, or 1d' ;;
         esac
     fi
-    if [[ $VIEW_MODE != connected ]] && { $INIT_CONFIG || $DISCOVER || [[ $COMMAND == wake || $COMMAND == traffic || $COMMAND == system || $COMMAND == vpn || $COMMAND == logs || $COMMAND == diagnose ]]; }; then
+    if [[ $VIEW_MODE != connected ]] && { $INIT_CONFIG || $DISCOVER || [[ $COMMAND == wake || $COMMAND == traffic || $COMMAND == system || $COMMAND == vpn || $COMMAND == logs || $COMMAND == diagnose || $COMMAND == wan || $COMMAND == dhcp || $COMMAND == routes || $COMMAND == mesh || $COMMAND == connections || $COMMAND == forwards || $COMMAND == speedtest ]]; }; then
         fail "$EXIT_USAGE" '--all is only valid for interface or policy listings'
     fi
     case $COMMAND in
         clients)
             if ((${#positional[@]})); then
-                [[ ${#positional[@]} == 2 && ${positional[0]} == inspect ]] || fail "$EXIT_USAGE" 'use clients inspect NAME|IP|MAC'
-                SUBCOMMAND=inspect; INSPECT_QUERY=${positional[1]}; positional=()
+                case ${positional[0]} in
+                    inspect) [[ ${#positional[@]} == 2 ]] || fail "$EXIT_USAGE" 'use clients inspect NAME|IP|MAC' ;;
+                    rename)
+                        [[ ${#positional[@]} == 3 ]] || fail "$EXIT_USAGE" 'use clients rename NAME|IP|MAC NEW_NAME'
+                        NEW_CLIENT_NAME=${positional[2]}
+                        [[ -n $NEW_CLIENT_NAME && ${#NEW_CLIENT_NAME} -le 255 && $NEW_CLIENT_NAME != *[[:cntrl:]]* ]] || fail "$EXIT_USAGE" 'client name must contain 1–255 characters without control characters'
+                        ;;
+                    *) fail "$EXIT_USAGE" 'use clients inspect or clients rename' ;;
+                esac
+                SUBCOMMAND=${positional[0]}; INSPECT_QUERY=${positional[1]}; positional=()
             fi ;;
         policy)
             if [[ ${positional[0]-} == inspect ]]; then
@@ -572,19 +659,51 @@ parse_args() {
             fi ;;
         wifi)
             if ((${#positional[@]})); then
-                [[ ${#positional[@]} == 1 && ${positional[0]} == monitor ]] || fail "$EXIT_USAGE" 'use wifi monitor'
-                SUBCOMMAND=monitor; positional=()
+                [[ ${#positional[@]} == 1 ]] || fail "$EXIT_USAGE" 'use wifi monitor, wifi clients, or wifi scan'
+                case ${positional[0]} in monitor|clients|scan) ;; *) fail "$EXIT_USAGE" 'use wifi monitor, wifi clients, or wifi scan' ;; esac
+                SUBCOMMAND=${positional[0]}; positional=()
             fi ;;
         vpn)
             [[ ${#positional[@]} == 0 || ( ${#positional[@]} == 1 && ${positional[0]} == peers ) ]] || fail "$EXIT_USAGE" 'use vpn peers'
             SUBCOMMAND=peers; positional=() ;;
-        system|logs) ((${#positional[@]} == 0)) || fail "$EXIT_USAGE" "$COMMAND does not accept positional arguments" ;;
+        system)
+            if ((${#positional[@]})); then
+                [[ ${#positional[@]} == 1 ]] || fail "$EXIT_USAGE" 'use system, system changes, system save, or system reboot'
+                case ${positional[0]} in reboot|save|changes) ;; *) fail "$EXIT_USAGE" 'use system, system changes, system save, or system reboot' ;; esac
+                SUBCOMMAND=${positional[0]}; positional=()
+            fi ;;
+        interfaces)
+            if ((${#positional[@]})); then
+                [[ ${#positional[@]} == 2 && ${positional[0]} == inspect ]] || fail "$EXIT_USAGE" 'use interfaces inspect ID'
+                SUBCOMMAND=inspect; INSPECT_QUERY=${positional[1]}; positional=()
+            fi ;;
+        logs|wan|dhcp|routes|mesh|speedtest|connections|forwards) ((${#positional[@]} == 0)) || fail "$EXIT_USAGE" "$COMMAND does not accept positional arguments" ;;
         diagnose)
             [[ ${#positional[@]} == 1 ]] || fail "$EXIT_USAGE" 'diagnose requires a hostname or IP address'
             DIAG_HOST=${positional[0]}; positional=()
             [[ $DIAG_HOST =~ ^[a-zA-Z0-9:][a-zA-Z0-9.:%_-]*$ && ${#DIAG_HOST} -le 253 ]] || fail "$EXIT_USAGE" 'invalid diagnostic hostname or IP address' ;;
     esac
-    [[ $SUBCOMMAND != inspect || -n $INSPECT_QUERY ]] || fail "$EXIT_USAGE" 'inspect requires a non-empty name or ID'
+    if [[ $SUBCOMMAND == reboot || $SUBCOMMAND == save || $SUBCOMMAND == rename ]]; then
+        if [[ -n $WATCH_INTERVAL ]] || $JSON_OUTPUT || $INTERACTIVE || [[ $VIEW_MODE != connected ]] || ((${#CLIENT_SELECTORS[@]})); then
+            fail "$EXIT_USAGE" "$COMMAND $SUBCOMMAND cannot be combined with listing or interactive options"
+        fi
+    fi
+    if [[ $COMMAND == interfaces ]]; then
+        if ! { [[ $RATE_INTERVAL =~ ^[1-9][0-9]?$ ]] && ((RATE_INTERVAL <= 60)); }; then fail "$EXIT_USAGE" '--sample must be between 1 and 60 seconds'; fi
+        ! $RATE_SAMPLE_SET || $INTERFACE_RATES || fail "$EXIT_USAGE" '--sample requires --rates'
+        if $INTERFACE_RATES && { $INTERACTIVE || [[ $SUBCOMMAND == inspect ]]; }; then fail "$EXIT_USAGE" '--rates is only valid for interface listings'; fi
+    fi
+    if [[ $COMMAND == wifi ]]; then
+        [[ -z $SCAN_RADIO || $SUBCOMMAND == scan ]] || fail "$EXIT_USAGE" '--radio requires wifi scan'
+        [[ $SUBCOMMAND != clients || $VIEW_MODE == connected ]] || fail "$EXIT_USAGE" 'wifi clients lists associated stations only'
+    fi
+    if [[ $COMMAND == speedtest ]]; then
+        [[ $SPEED_SERVER =~ ^[a-zA-Z0-9:][a-zA-Z0-9.:%_-]*$ && ${#SPEED_SERVER} -le 253 ]] || fail "$EXIT_USAGE" 'speedtest requires --server HOST'
+        if ! { [[ $SPEED_PORT =~ ^[1-9][0-9]{0,4}$ ]] && ((SPEED_PORT <= 65535)); }; then fail "$EXIT_USAGE" '--port must be between 1 and 65535'; fi
+        if ! { [[ $SPEED_DURATION =~ ^[1-9][0-9]?$ ]] && ((SPEED_DURATION <= 30)); }; then fail "$EXIT_USAGE" '--duration must be between 1 and 30 seconds'; fi
+        $DRY_RUN && $JSON_OUTPUT && fail "$EXIT_USAGE" 'speedtest --dry-run cannot be combined with --json'
+    fi
+    [[ $SUBCOMMAND != inspect && $SUBCOMMAND != rename || -n $INSPECT_QUERY ]] || fail "$EXIT_USAGE" 'inspect requires a non-empty name or ID'
     if [[ $SUBCOMMAND == inspect ]] && { $INTERACTIVE || $DRY_RUN || $UNDO || [[ -n $ACTION ]] || ((${#CLIENT_SELECTORS[@]})); }; then
         fail "$EXIT_USAGE" 'inspect cannot be combined with client selectors or actions'
     fi
@@ -628,14 +747,14 @@ parse_args() {
     if ((${#CLIENT_SELECTORS[@]} > 1)) && [[ -z $ACTION ]]; then
         fail "$EXIT_USAGE" 'multiple client selectors require an explicit action'
     fi
-    if $DRY_RUN && [[ -z $ACTION ]] && ! $INTERACTIVE && ! $UNDO; then
-        fail "$EXIT_USAGE" '--dry-run requires an action, --interactive, or --undo'
+    if $DRY_RUN && [[ -z $ACTION && $SUBCOMMAND != reboot && $SUBCOMMAND != save && $SUBCOMMAND != rename && $COMMAND != speedtest ]] && ! $INTERACTIVE && ! $UNDO; then
+        fail "$EXIT_USAGE" '--dry-run requires an action, --interactive, --undo, or system reboot'
     fi
     if [[ -n $WATCH_INTERVAL ]]; then
         if ! { [[ $WATCH_INTERVAL =~ ^[1-9][0-9]{0,3}$ ]] && ((WATCH_INTERVAL <= 3600)); }; then
             fail "$EXIT_USAGE" '--watch must be between 1 and 3600 seconds'
         fi
-        $INIT_CONFIG || $DISCOVER || $INTERACTIVE || $DRY_RUN || $UNDO || [[ -n $ACTION || $COMMAND == diagnose ]] || ((${#CLIENT_SELECTORS[@]})) \
+        $INIT_CONFIG || $DISCOVER || $INTERACTIVE || $DRY_RUN || $UNDO || [[ -n $ACTION || $COMMAND == diagnose || $COMMAND == speedtest || ( $COMMAND == wifi && $SUBCOMMAND == scan ) ]] || ((${#CLIENT_SELECTORS[@]})) \
             && fail "$EXIT_USAGE" '--watch is only available for read-only views'
         [[ -t 1 ]] || $JSON_OUTPUT || fail "$EXIT_USAGE" '--watch requires a terminal or --json'
     fi
@@ -2370,8 +2489,26 @@ render_report() {
         "$(table_format_filter) $(report_format_filter) $filter" "$file"
 }
 
+system_reboot() {
+    if $DRY_RUN; then
+        printf 'Would request an immediate reboot of %s.\n' "$ROUTER_URL"
+        return
+    fi
+    # One request only: a lost response can mean the router is already rebooting.
+    OPERATION_CONTEXT="reboot request to $ROUTER_URL; if the response is lost, the router may already be rebooting"
+    http_request POST /rci/ "$TMP_DIR/reboot-result.json" '{"system":{"reboot":{}}}'
+    [[ $HTTP_STATUS == 200 ]] || response_error 'failed to request router reboot' "$TMP_DIR/reboot-result.json"
+    if ! jq -e 'type == "object" and (any(.. | objects; .status? == "error") | not)' \
+        "$TMP_DIR/reboot-result.json" >/dev/null 2>&1; then
+        fail 'router rejected the reboot command or returned an invalid response'
+    fi
+    OPERATION_CONTEXT=
+    success "Reboot request accepted by $ROUTER_URL."
+}
+
 system_main() {
     start_router_session
+    case $SUBCOMMAND in reboot) system_reboot; return ;; changes) system_changes; return ;; save) system_save; return ;; esac
     api_get /rci/show/system "$TMP_DIR/system-raw.json" 'system health' object
     read_optional_json /rci/show/version "$TMP_DIR/version.json" object 'Firmware metadata'
     if ! jq --arg router "$ROUTER_URL" --slurpfile version "$TMP_DIR/version.json" '
@@ -2465,6 +2602,7 @@ wifi_monitor_main() {
 
 clients_main() {
     start_router_session
+    if [[ $SUBCOMMAND == rename ]]; then clients_rename; return; fi
     if [[ $SUBCOMMAND != inspect ]]; then
         fetch_router_state; detect_current_client
         if $JSON_OUTPUT; then list_clients_json; else list_clients_table; fi
@@ -2643,6 +2781,360 @@ diagnose_main() {
                 [.logs[] | [.timestamp,.level,.source,.message]]) end)'
 }
 
+# Normalize only public status fields; raw RCI replies can contain credentials.
+data_filter() {
+    cat <<'JQ'
+        def txt: if type == "string" then . else null end;
+        def num: if type == "number" or type == "string" then (try tonumber catch null) else null end
+            | if isinfinite or isnan then null else . end;
+        def flag: if . == true or . == "yes" or . == "up" then true
+                  elif . == false or . == "no" or . == "down" then false else null end;
+        def entries($key):
+            if type == "array" then . elif type == "object" and (.[$key] | type) == "array" then .[$key]
+            elif . == {} then [] else error("unexpected list response") end
+            | if all(.[]; type == "object") then . else error("invalid list entry") end;
+        if any(.. | objects; .status? == "error") then error("router command error") else . end
+JQ
+}
+
+normalize_data() {
+    local input=$1 output=$2 filter=$3
+    shift 3
+    if ! jq --arg router "$ROUTER_URL" "$@" "$(data_filter) | $filter" "$input" > "$output"; then
+        fail 'the router returned invalid data for this view'
+    fi
+}
+
+get_view() {
+    http_request GET "$1" "$2"
+    [[ $HTTP_STATUS == 200 ]] || response_error "failed to retrieve $3" "$2"
+}
+
+wait_interval() {
+    sleep "$1" &
+    WATCH_SLEEP_PID=$!
+    wait "$WATCH_SLEEP_PID"
+    WATCH_SLEEP_PID=
+}
+
+fetch_routes() {
+    get_view /rci/show/ip/route "$TMP_DIR/routes4.json" 'IPv4 routes'
+    read_optional_json /rci/show/ipv6/route "$TMP_DIR/routes6.json" object 'IPv6 routes'
+    # shellcheck disable=SC2016 # Variables in the filter belong to jq.
+    normalize_data "$TMP_DIR/routes4.json" "$TMP_DIR/routes.json" '
+        def route($family): {family:$family,destination:(.destination | txt),gateway:(.gateway | txt),
+            interface:(.interface | txt),metric:(.metric | num),flags:(.flags | txt),protocol:(.proto | txt),
+            rejecting:(.rejecting | flag),floating:(.floating | flag),static:(.static | flag)};
+        if type != "array" then error("invalid IPv4 routes") else . end
+        | {router:$router,ipv6_available:($v6[0] != null),routes:
+            ([entries("")[] | route(4)] +
+             (if $v6[0] == null then [] else [$v6[0] | entries("route6")[] | route(6)] end))}
+    ' --slurpfile v6 "$TMP_DIR/routes6.json"
+}
+
+routes_main() {
+    start_router_session
+    fetch_routes
+    render_report "$TMP_DIR/routes.json" '
+        grid("Routing table"; ["DESTINATION","GATEWAY","INTERFACE","METRIC","FLAGS","PROTO"];
+            [.routes[] | [.destination,.gateway,.interface,.metric,.flags,.protocol]])'
+}
+
+wan_main() {
+    start_router_session
+    get_view /rci/show/internet/status "$TMP_DIR/wan-health.json" 'Internet status'
+    VIEW_MODE=all
+    fetch_interface_status
+    read_optional_json /rci/show/ip/name-server "$TMP_DIR/wan-dns.json" object 'DNS servers'
+    read_optional_json /rci/show/dns-proxy "$TMP_DIR/wan-dns-proxy.json" object 'Encrypted DNS servers'
+    read_optional_json /rci/show/ping-check "$TMP_DIR/wan-checks.json" object 'Connection checks'
+    # shellcheck disable=SC2016 # Variables in the filter belong to jq.
+    normalize_data "$TMP_DIR/wan-health.json" "$TMP_DIR/wan.json" '
+        if type != "object" or (has("internet") | not) then error("invalid Internet status") else . end
+        | . as $health
+        | {router:$router,internet:(.internet | flag),reliable:(.reliable | flag),checked:(.checked | txt),
+            gateway:(.gateway.address | txt),active_interface:(.gateway.interface | txt),
+            gateway_accessible:(."gateway-accessible" | flag),dns_accessible:(."dns-accessible" | flag),
+            captive_accessible:(."captive-accessible" | flag),
+            connections:[$raw[0] | to_entries[] | .key as $key | .value | select(.global == true)
+                | (.id // $key) as $id | {id:$id,description:(.description | txt),address:(.address | txt),
+                    priority:(.priority | num),default_gateway:(.defaultgw | flag),
+                    role:(if $id == $health.gateway.interface or .defaultgw == true then "active" else "alternate" end),
+                    status:(first($status[0].interfaces[] | select(.id == $id) | .status) // "unknown")}],
+            dns_servers:(([$dns[0].server[]? | {address:(.address | txt),transport:"plain",interface:(.interface | txt)}] +
+                [$proxy[0]["proxy-status"][]? | (."proxy-tls"."server-tls"[]? |
+                    {address:(.sni // .address | txt),transport:"TLS",interface:(.interface | txt)}),
+                    (."proxy-https"."server-https"[]? | {address:((.uri | txt // "")
+                        | try capture("^https://(?:[^/@]+@)?(?<host>\\[[^]]+\\]|[^/:?#]+)").host catch null),
+                        transport:"HTTPS",interface:(.interface | txt)})]) | map(select(.address != null)) | unique),
+            dns_available:($dns[0] != null or $proxy[0] != null),
+            checks:(if $checks[0] == null then null else [$checks[0].pingcheck[]? | . as $check
+                | .interface | to_entries[] | {profile:$check.profile,interface:.key,status:(.value.status | txt),
+                    successes:(.value.successcount | num),failures:(.value.failcount | num)}] end)}
+    ' --slurpfile raw "$TMP_DIR/interfaces.json" --slurpfile status "$TMP_DIR/status.json" \
+        --slurpfile dns "$TMP_DIR/wan-dns.json" --slurpfile proxy "$TMP_DIR/wan-dns-proxy.json" --slurpfile checks "$TMP_DIR/wan-checks.json"
+    render_report "$TMP_DIR/wan.json" '
+        fields("Internet health"; [["Internet",.internet],["Reliable",.reliable],["Active interface",.active_interface],
+            ["Gateway",.gateway],["Gateway reachable",.gateway_accessible],["DNS reachable",.dns_accessible],["Checked",.checked]]),"",
+        grid("Internet connections"; ["INTERFACE","NAME","ROLE","STATUS","ADDRESS","PRIORITY"];
+            [.connections[] | [.id,.description,.role,.status,.address,.priority]]),"",
+        grid("DNS servers"; ["SERVER","TRANSPORT","INTERFACE"]; [.dns_servers[] | [.address,.transport,.interface]]),"",
+        (if .checks == null then "Connection checks unavailable" else
+            grid("Connection checks"; ["INTERFACE","PROFILE","STATUS","PASS","FAIL"];
+                [.checks[] | [.interface,.profile,.status,.successes,.failures]]) end)'
+}
+
+dhcp_main() {
+    start_router_session
+    get_view /rci/show/ip/dhcp/bindings "$TMP_DIR/dhcp-raw.json" 'DHCP leases'
+    # A static reservation is configuration, not an inference from an infinite lease.
+    get_view /rci/ip/dhcp/host "$TMP_DIR/dhcp-static-raw.json" 'DHCP reservations'
+    # shellcheck disable=SC2016 # Variables in the filter belong to jq.
+    normalize_data "$TMP_DIR/dhcp-static-raw.json" "$TMP_DIR/dhcp-static.json" '
+        (if type == "object" and has("mac") then [.] else entries("host") end)
+        | map({mac:(.mac | txt | ascii_downcase),ip:(.ip | txt)})'
+    # shellcheck disable=SC2016 # Variables in the filter belong to jq.
+    normalize_data "$TMP_DIR/dhcp-raw.json" "$TMP_DIR/dhcp.json" '
+        entries("lease") | map(. as $lease | (.mac | txt | ascii_downcase) as $mac
+            | {name:(.name // .hostname | txt),hostname:(.hostname | txt),mac:$mac,ip:(.ip | txt),
+               device:(.device | txt),expires_seconds:(.expires | num),infinite:(.expires == "infinity"),
+               assignment:(if any($reserved[0][]; .mac == $mac and .ip == $lease.ip) then "static" else "dynamic" end),
+               lease_present:true}) as $leases
+        | {router:$router,leases:($leases + [$reserved[0][] | . as $reservation
+            | select(any($leases[]; .mac == $reservation.mac and .ip == $reservation.ip) | not)
+            | . + {name:null,hostname:null,device:null,expires_seconds:null,infinite:null,assignment:"static",lease_present:false}])}
+    ' --slurpfile reserved "$TMP_DIR/dhcp-static.json"
+    render_report "$TMP_DIR/dhcp.json" '
+        grid("DHCP leases and reservations"; ["NAME","IP","MAC","TYPE","EXPIRES","LEASE"];
+            [.leases[] | [.name,.ip,.mac,.assignment,(if .infinite then "infinite" else (.expires_seconds | duration) end),.lease_present]])'
+}
+
+mesh_main() {
+    start_router_session
+    get_view /rci/show/mws/member "$TMP_DIR/mesh-members.json" 'mesh members'
+    read_optional_json /rci/show/mws/status "$TMP_DIR/mesh-state.json" object 'Mesh controller status'
+    # shellcheck disable=SC2016 # Variables in the filter belong to jq.
+    normalize_data "$TMP_DIR/mesh-members.json" "$TMP_DIR/mesh.json" '
+        entries("member")
+        | {router:$router,auto_update:($state[0]["auto-update"] | flag),
+            update_pending:($state[0].controller["update-pending"] | flag),members:map({
+                name:(."known-host" // .name // .model | txt),model:(.model | txt),mac:(.mac | txt),ip:(.ip | txt),
+                firmware:(.fw | txt),clients:(.associations | num),internet:(."internet-available" | flag),
+                status:(if .rci.errors == 0 then "responding" elif (.rci.errors | num // 0) > 0 then "API errors" else "unknown" end),
+                uptime_seconds:(.system.uptime | num),uplink:(.backhaul.uplink | txt),parent:(.backhaul.bridge | txt),
+                root:(.backhaul.root | txt),ap:(.backhaul.ap | txt),signal_dbm:(.backhaul.rssi | num),
+                tx_rate_mbps:(.backhaul.txrate | num),backhaul_authenticated:(.backhaul.authenticated | flag)})}
+    ' --slurpfile state "$TMP_DIR/mesh-state.json"
+    render_report "$TMP_DIR/mesh.json" '
+        fields("Mesh controller"; [["Auto update",.auto_update],["Update pending",.update_pending]]),"",
+        grid("Mesh nodes"; ["NODE","IP","STATUS","UPLINK","PARENT","SIGNAL","CLIENTS"];
+            [.members[] | [.name,.ip,.status,.uplink,.parent,.signal_dbm,.clients]])'
+}
+
+wifi_clients_main() {
+    get_view /rci/show/associations "$TMP_DIR/stations-raw.json" 'Wi-Fi stations'
+    read_optional_json /rci/show/ip/hotspot/host "$TMP_DIR/station-hosts.json" array 'Client names'
+    # shellcheck disable=SC2016 # Variables in the filter belong to jq.
+    normalize_data "$TMP_DIR/stations-raw.json" "$TMP_DIR/stations.json" '
+        entries("station") | {router:$router,clients:map(. as $station | (.mac | txt | ascii_downcase) as $mac
+            | (first($hosts[0][]? | select((.mac | ascii_downcase) == $mac)) // {}) as $host
+            | {name:($host.name // $host.hostname | txt),ip:($host.ip | txt),mac:$mac,ap:(.ap | txt),
+                signal_dbm:(.rssi | num),tx_rate_mbps:(.txrate | num),rx_rate_mbps:(.rxrate | num),
+                standard:(.mode | txt),channel_width_mhz:(.ht | num),spatial_streams:(.txss | num),
+                mcs:(.mcs | num),security:(.security | txt),authenticated:(.authenticated | flag),
+                uptime_seconds:(.uptime | num),rx_bytes:(.rxbytes | num),tx_bytes:(.txbytes | num)})}
+    ' --slurpfile hosts "$TMP_DIR/station-hosts.json"
+    render_report "$TMP_DIR/stations.json" '
+        grid("Associated Wi-Fi clients"; ["NAME / MAC","AP","SIGNAL","TX Mbps","STANDARD","WIDTH","STREAMS"];
+            [.clients[] | [(.name // .mac),.ap,.signal_dbm,.tx_rate_mbps,.standard,.channel_width_mhz,.spatial_streams]])'
+}
+
+wifi_scan_main() {
+    local id payload
+    get_view /rci/show/interface "$TMP_DIR/scan-interfaces.json" 'Wi-Fi radios'
+    # shellcheck disable=SC2016 # Variables in the filter belong to jq.
+    normalize_data "$TMP_DIR/scan-interfaces.json" "$TMP_DIR/scan-radios.json" '
+        if type != "object" or any(.[]; type != "object") then error("invalid radios") else . end
+        | [to_entries[] | .key as $key | .value | select(.type == "WifiMaster")
+            | {id:(.id // $key),state:(.state | txt)} | select($radio == "" or .id == $radio)
+            | select($radio != "" or $all or .state != "down")]
+    ' --arg radio "$SCAN_RADIO" --argjson all "$([[ $VIEW_MODE == all ]] && echo true || echo false)"
+    [[ -z $SCAN_RADIO ]] || jq -e 'length == 1' "$TMP_DIR/scan-radios.json" >/dev/null || fail "$EXIT_USAGE" 'unknown Wi-Fi radio'
+    printf '[]\n' > "$TMP_DIR/scan-cells.json"
+    while IFS= read -r id; do
+        payload=$(jq -nc --arg id "$id" '{show:{"site-survey":{name:$id}}}')
+        http_request POST /rci/ "$TMP_DIR/scan-response.json" "$payload"
+        [[ $HTTP_STATUS == 200 ]] || response_error "failed to survey $id" "$TMP_DIR/scan-response.json"
+        # shellcheck disable=SC2016 # Variables in the filter belong to jq.
+        normalize_data "$TMP_DIR/scan-response.json" "$TMP_DIR/scan-radio-cells.json" '
+            .show["site-survey"] | entries("ap_cell") | map({radio:$radio,bssid:(.address | txt),ssid:(.essid | txt),
+                channel:(.channel | num),signal_dbm:(.rssi | num),quality:(.quality | num),
+                security:(."encryption-mode" // .encryption | txt),standard:(.ieee | txt),
+                channel_width:(.bandwidth | txt),load_percent:(.load | num)})
+        ' --arg radio "$id"
+        jq -s '.[0] + .[1]' "$TMP_DIR/scan-cells.json" "$TMP_DIR/scan-radio-cells.json" > "$TMP_DIR/scan-next.json"
+        mv "$TMP_DIR/scan-next.json" "$TMP_DIR/scan-cells.json"
+    done < <(jq -r '.[].id' "$TMP_DIR/scan-radios.json")
+    jq --arg router "$ROUTER_URL" '{router:$router,networks:(sort_by(-(.signal_dbm // -999)))}' "$TMP_DIR/scan-cells.json" > "$TMP_DIR/scan.json"
+    render_report "$TMP_DIR/scan.json" '
+        grid("Nearby Wi-Fi networks"; ["SSID","BSSID","RADIO","CH","SIGNAL","SECURITY"];
+            [.networks[] | [(.ssid | if . == "" then "(hidden)" else . end),.bssid,.radio,.channel,.signal_dbm,.security]])'
+}
+
+select_report_client() {
+    local matches count
+    VIEW_MODE=all
+    fetch_router_state
+    matches=$(jq --arg query "$INSPECT_QUERY" '[.[] | select(.ip == $query or .mac == ($query | ascii_downcase)
+        or (.name | ascii_downcase) == ($query | ascii_downcase))] | unique_by(.mac)' "$TMP_DIR/all-clients.json")
+    count=$(jq 'length' <<< "$matches")
+    ((count > 0)) || fail "$EXIT_CLIENT" "no client matches $INSPECT_QUERY"
+    ((count == 1)) || fail "$EXIT_CLIENT" 'client name is ambiguous; use its IP or MAC address'
+    SELECTED_CLIENT=$(jq -c '.[0]' <<< "$matches")
+}
+
+connections_main() {
+    local client_ip=
+    start_router_session
+    if [[ -n $INSPECT_QUERY ]]; then
+        select_report_client
+        client_ip=$(jq -r '.ip' <<< "$SELECTED_CLIENT")
+        [[ $client_ip != N/A && $client_ip != null && -n $client_ip ]] || fail "$EXIT_CLIENT" 'the client has no known IP address'
+    fi
+    get_view /rci/show/ip/nat "$TMP_DIR/nat-raw.json" 'active NAT connections'
+    # shellcheck disable=SC2016 # Variables in the filter belong to jq.
+    normalize_data "$TMP_DIR/nat-raw.json" "$TMP_DIR/connections.json" '
+        if type != "array" then error("invalid NAT connections") else entries("") end
+        | {router:$router,client_ip:(if $ip == "" then null else $ip end),connections:[.[]
+            | select($ip == "" or .src == $ip or .dst == $ip or ."src-out" == $ip or ."dst-out" == $ip)
+            | {protocol:(.protocol | txt),source:(.src | txt),source_port:(.sport | num),destination:(.dst | txt),
+                destination_port:(.dport | num),translated_source:(."src-out" | txt),translated_source_port:(."sport-out" | num),
+                translated_destination:(."dst-out" | txt),translated_destination_port:(."dport-out" | num),
+                bytes:(.bytes | num),reply_bytes:(."bytes-out" | num),packets:(.packets | num),reply_packets:(."packets-out" | num)}]}
+    ' --arg ip "$client_ip"
+    # shellcheck disable=SC2016 # Variables in the filter belong to jq.
+    render_report "$TMP_DIR/connections.json" '
+        def endpoint($ip; $port): (if $ip == null then "unknown" elif $ip | contains(":") then "["+$ip+"]" else $ip end)
+            + (if $port == null then "" else ":"+($port | tostring) end);
+        grid("Active NAT connections"; ["SOURCE","DESTINATION","PROTO","BYTES","REPLY BYTES"];
+            [.connections[] | [endpoint(.source;.source_port),endpoint(.destination;.destination_port),.protocol,(.bytes | bytes),(.reply_bytes | bytes)]])'
+}
+
+forwards_main() {
+    start_router_session
+    get_view /rci/ip/static "$TMP_DIR/forwards-raw.json" 'port forwarding rules'
+    # shellcheck disable=SC2016 # Variables in the filter belong to jq.
+    normalize_data "$TMP_DIR/forwards-raw.json" "$TMP_DIR/forwards.json" '
+        (if type == "object" and has("to-host") then [.] else entries("static") end)
+        | {router:$router,rules:map({interface:(.interface | txt),protocol:(.protocol | txt),
+            port:(.port | num),end_port:(."end-port" | num),destination:(."to-host" | txt),
+            destination_port:(."to-port" // .port | num),comment:(.comment | txt),
+            enabled:(if .disable == true then false elif .disable == null or .disable == false or .disable == {no:true} then true else null end)})}
+    '
+    render_report "$TMP_DIR/forwards.json" '
+        grid("Port forwarding rules"; ["INTERFACE","PROTO","PORT","DESTINATION","TO PORT","ENABLED","COMMENT"];
+            [.rules[] | [.interface,.protocol,((.port | text) + (if .end_port == null then "" else "–"+(.end_port | text) end)),
+                .destination,.destination_port,.enabled,.comment]])'
+}
+
+fetch_changes() {
+    get_view /rci/show/last-change "$TMP_DIR/changes-raw.json" 'configuration change status'
+    # shellcheck disable=SC2016 # Variables in the filter belong to jq.
+    normalize_data "$TMP_DIR/changes-raw.json" "$TMP_DIR/changes.json" '
+        if type != "object" or (has("date") or has("checksum") or has("fail-safe") | not) then error("invalid change status") else . end
+        | {router:$router,date:(.date | txt),agent:(.agent | txt),user:(.user | txt),checksum:(.checksum | txt),
+            unsaved:(."fail-safe".unsaved | flag),rollback:(."fail-safe".rollback | flag),
+            blocked:(."fail-safe".blocked | flag),remaining_seconds:(."fail-safe"["time-left"] | num)}
+    '
+}
+
+system_changes() {
+    fetch_changes
+    render_report "$TMP_DIR/changes.json" '
+        fields("Configuration changes"; [["Last change",.date],["Agent",.agent],["User",.user],
+            ["Unsaved",.unsaved],["Rollback",.rollback],["Blocked",.blocked],["Fail-safe remaining",(.remaining_seconds | duration)]])'
+}
+
+check_write_reply() {
+    [[ $HTTP_STATUS == 200 ]] || response_error "$1" "$2"
+    jq -e 'type == "object" and (any(.. | objects; .status? == "error") | not)' "$2" >/dev/null 2>&1 \
+        || fail "$1: router rejected the command or returned invalid data"
+}
+
+system_save() {
+    local attempt
+    fetch_changes
+    if $DRY_RUN; then
+        printf 'Would save the running configuration on %s (unsaved: %s).\n' "$ROUTER_URL" "$(jq -r '.unsaved' "$TMP_DIR/changes.json")"
+        return
+    fi
+    jq -e '.unsaved | type == "boolean"' "$TMP_DIR/changes.json" >/dev/null || fail 'router does not report whether configuration is saved'
+    if jq -e '.unsaved == false' "$TMP_DIR/changes.json" >/dev/null; then unchanged 'Configuration is already saved.'; return; fi
+    OPERATION_CONTEXT='configuration save may have started if the response is lost'
+    http_request POST /rci/ "$TMP_DIR/save-result.json" '{"system":{"configuration":{"save":{}}}}'
+    check_write_reply 'failed to save configuration' "$TMP_DIR/save-result.json"
+    for attempt in 0 1 2 3; do
+        ((attempt == 0)) || wait_interval 1
+        fetch_changes
+        if jq -e '.unsaved == false' "$TMP_DIR/changes.json" >/dev/null; then
+            OPERATION_CONTEXT=
+            success "Configuration saved and verified on $ROUTER_URL."
+            return
+        fi
+    done
+    fail "$EXIT_VERIFY" 'configuration is still unsaved or cannot be verified after 4 checks'
+}
+
+clients_rename() {
+    local mac payload attempt
+    select_report_client
+    mac=$(jq -r '.mac' <<< "$SELECTED_CLIENT")
+    [[ $mac =~ ^([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}$ ]] || fail "$EXIT_CLIENT" 'selected client has an invalid MAC address'
+    if $DRY_RUN; then printf 'Would rename client %s to %s on %s.\n' "$mac" "$NEW_CLIENT_NAME" "$ROUTER_URL"; return; fi
+    if [[ $(jq -r '.name' <<< "$SELECTED_CLIENT") == "$NEW_CLIENT_NAME" ]]; then unchanged 'Client already has this name.'; return; fi
+    payload=$(jq -nc --arg mac "$mac" --arg name "$NEW_CLIENT_NAME" '{known:{host:{mac:$mac,name:$name}}}')
+    OPERATION_CONTEXT="client $mac may have been renamed if the response is lost"
+    http_request POST /rci/ "$TMP_DIR/rename-result.json" "$payload"
+    check_write_reply 'failed to rename client' "$TMP_DIR/rename-result.json"
+    for attempt in 0 1 2 3; do
+        ((attempt == 0)) || wait_interval 0.3
+        api_get /rci/show/ip/hotspot/host "$TMP_DIR/rename-hosts.json" 'client names' array
+        if jq -e --arg mac "$mac" --arg name "$NEW_CLIENT_NAME" 'any(.[]; (.mac | ascii_downcase) == $mac and .name == $name)' "$TMP_DIR/rename-hosts.json" >/dev/null; then
+            OPERATION_CONTEXT=
+            success "Client $mac renamed to $NEW_CLIENT_NAME and verified."
+            return
+        fi
+    done
+    fail "$EXIT_VERIFY" 'could not verify the new client name after 4 checks'
+}
+
+speedtest_main() {
+    local payload
+    start_router_session
+    if [[ -n $DIAG_INTERFACE ]]; then
+        VIEW_MODE=all
+        fetch_interface_status
+        jq -e --arg id "$DIAG_INTERFACE" 'any(.interfaces[]; .id == $id)' "$TMP_DIR/status.json" >/dev/null \
+            || fail "$EXIT_USAGE" 'unknown speedtest source interface'
+    fi
+    payload=$(jq -nc --arg host "$SPEED_SERVER" --arg source "$DIAG_INTERFACE" --argjson port "$SPEED_PORT" \
+        --argjson time "$SPEED_DURATION" --argjson reverse "$SPEED_REVERSE" '
+        {host:$host,tcp:true,time:$time,port:$port} + (if $host | contains(":") then {ipv6:true} else {ipv4:true} end)
+        + (if $reverse then {reverse:true} else {} end)
+        + (if $source == "" then {} else {"source-interface":$source} end)')
+    if $DRY_RUN; then printf 'Would run router-side iPerf3: %s\n' "$payload"; return; fi
+    printf '[]\n' > "$TMP_DIR/diagnostics-tests.json"
+    $QUIET || printf 'Running router-side iPerf3 to %s:%s for %s seconds...\n' "$SPEED_SERVER" "$SPEED_PORT" "$SPEED_DURATION" >&2
+    run_diagnostic_test iperf3 "$payload"
+    jq --arg router "$ROUTER_URL" --arg server "$SPEED_SERVER" --argjson port "$SPEED_PORT" --argjson duration "$SPEED_DURATION" \
+        --argjson reverse "$SPEED_REVERSE" '{router:$router,server:$server,port:$port,duration_seconds:$duration,
+            direction:(if $reverse then "download" else "upload" end),test:.[0]}' "$TMP_DIR/diagnostics-tests.json" > "$TMP_DIR/speedtest.json"
+    # shellcheck disable=SC2016 # $screen belongs to jq.
+    render_report "$TMP_DIR/speedtest.json" '
+        fields("Router throughput test"; [["Server",.server],["Port",.port],["Direction",.direction],["Duration",(.duration_seconds | duration)]]),"",
+        (.test.lines[] | clean | wordwrap($screen)[])'
+}
+
 status_main() {
     start_router_session
     fetch_interface_status
@@ -2761,12 +3253,97 @@ apply_interface_action() {
     fail "$EXIT_VERIFY" "could not verify administrative state $action after 4 checks over 1 second"
 }
 
+interface_inspect() {
+    VIEW_MODE=all
+    fetch_interface_status
+    jq --arg id "$INSPECT_QUERY" '.interfaces |= map(select(.id == $id))' "$TMP_DIR/status.json" > "$TMP_DIR/inspect-selected.json"
+    jq -e '.interfaces | length == 1' "$TMP_DIR/inspect-selected.json" >/dev/null || fail "$EXIT_USAGE" 'unknown interface ID'
+    mv "$TMP_DIR/inspect-selected.json" "$TMP_DIR/status.json"
+    fetch_interface_traffic
+    fetch_routes
+    # shellcheck disable=SC2016 # Variables in the filter belong to jq.
+    normalize_data "$TMP_DIR/interfaces.json" "$TMP_DIR/interface-details.json" '
+        (first(to_entries[] | select((.value.id // .key) == $id) | .value)) as $raw
+        | {router:$router,interface:($selected[0].interfaces[0] + {
+            mtu:($raw.mtu | num),mac:($raw.mac | txt),speed_mbps:($raw.speed // $raw.port.speed | num),duplex:($raw.duplex // $raw.port.duplex | txt),
+            priority:($raw.priority | num),global:($raw.global | flag),default_gateway:($raw.defaultgw | flag),
+            uptime_seconds:($raw.uptime | num),
+            gateways:[$routes[0].routes[] | select(.interface == $id and (.destination == "0.0.0.0/0" or .destination == "::/0"))
+                | {family,gateway,metric}],
+            ports:((if ($raw.port | type) == "object" and ($raw.port | has("id") or has("link") or has("speed")) then [$raw.port]
+                elif ($raw.port | type) == "object" then [$raw.port | to_entries[] | select(.value | type == "object")
+                    | .value + {id:(.value.id // .key)} | select(has("link") or has("speed"))]
+                elif ($raw.port | type) == "array" then $raw.port else [] end)
+                | map({id:(.id | txt),label:(.label | txt),speed_mbps:(.speed | num),duplex:(.duplex | txt),link:(.link | txt)}))})}
+    ' --arg id "$INSPECT_QUERY" --slurpfile selected "$TMP_DIR/status.json" --slurpfile routes "$TMP_DIR/routes.json"
+    render_report "$TMP_DIR/interface-details.json" '
+        .interface | fields("Interface details"; [["ID",.id],["Name",.description],["Type",.type],["Status",.status],
+            ["MAC",.mac],["IPv4",.ipv4],["Mask",.mask],["IPv6",([.ipv6[] | .address] | join(", "))],
+            ["MTU",.mtu],["Link Mbps",.speed_mbps],["Duplex",.duplex],["Priority",.priority],
+            ["Default gateway",.default_gateway],["Gateways",([.gateways[].gateway] | join(", "))],["Uptime",(.uptime_seconds | duration)],
+            ["RX",(.traffic.rx_bytes | bytes)],["TX",(.traffic.tx_bytes | bytes)],
+            ["RX packets",.traffic.rx_packets],["TX packets",.traffic.tx_packets],["RX errors",.traffic.rx_errors],
+            ["TX errors",.traffic.tx_errors],["RX dropped",.traffic.rx_dropped],["TX dropped",.traffic.tx_dropped]]),
+        (if .ports | length > 0 then "",grid("Physical ports"; ["PORT","LABEL","LINK","SPEED Mbps","DUPLEX"];
+            [.ports[] | [.id,.label,.link,.speed_mbps,.duplex]]) else empty end)'
+}
+
+interface_rates() {
+    local previous="$TMP_DIR/rates-previous.json" sampled_at elapsed
+    fetch_interface_status
+    fetch_interface_traffic
+    sampled_at=$SECONDS
+    if [[ ! -f $previous ]]; then
+        jq --argjson now "$sampled_at" '. + {sampled_at:$now}' "$TMP_DIR/status.json" > "$previous"
+        wait_interval "$RATE_INTERVAL"
+        fetch_interface_status
+        fetch_interface_traffic
+        sampled_at=$SECONDS
+    fi
+    elapsed=$((sampled_at - $(jq -r '.sampled_at' "$previous")))
+    # A frame can be requested before one second has elapsed; avoid dividing by zero.
+    if ((elapsed < 1)); then
+        wait_interval 1
+        fetch_interface_status
+        fetch_interface_traffic
+        sampled_at=$SECONDS
+        elapsed=$((sampled_at - $(jq -r '.sampled_at' "$previous")))
+    fi
+    # shellcheck disable=SC2016 # Variables in the filter belong to jq.
+    normalize_data "$TMP_DIR/status.json" "$TMP_DIR/rates.json" '
+        ($previous[0].interfaces | map({key:.id,value:.}) | from_entries) as $before
+        | . + {sampled_at:$now,sample_seconds:$elapsed}
+        | .interfaces |= map(. as $current | $before[.id] as $old
+            | def rate($key): ($current.traffic[$key] | num) as $new | ($old.traffic[$key] | num) as $last
+                | if $elapsed > 0 and $new != null and $last != null and $new >= $last
+                    and $old.status == $current.status and $old.ipv4 == $current.ipv4
+                    and $current.link != "down" and ($current.status == "connected" or $current.status == "link up")
+                  then ($new - $last) / $elapsed else null end;
+              (rate("rx_bytes")) as $rx | (rate("tx_bytes")) as $tx
+              | . + {rx_bytes_per_second:$rx,tx_bytes_per_second:$tx,
+                    rx_history:(if $rx == null then [] else (($old.rx_history // []) + [$rx])[-20:] end),
+                    tx_history:(if $tx == null then [] else (($old.tx_history // []) + [$tx])[-20:] end)})
+    ' --argjson now "$sampled_at" --argjson elapsed "$elapsed" --slurpfile previous "$previous"
+    cp "$TMP_DIR/rates.json" "$previous"
+    # shellcheck disable=SC2016 # Variables in the filter belong to jq.
+    render_report "$TMP_DIR/rates.json" '
+        def mbps: if . == null then null else (. * 8 / 1000000 * 100 | round) / 100 end;
+        def spark: . as $samples | (max // 0) as $peak
+            | if length == 0 then "unknown" else [ $samples[] | if $peak == 0 then "▁" else
+                "▁▂▃▄▅▆▇█"[([(. / $peak * 7 | floor),7] | min):([(. / $peak * 7 | floor),7] | min)+1] end ] | join("") end;
+        grid("Interface rates · " + (.sample_seconds | tostring) + "s sample";
+            ["INTERFACE","STATUS","RX Mbps","TX Mbps","RX HISTORY","TX HISTORY"];
+            [.interfaces[] | [.id,.status,(.rx_bytes_per_second | mbps),(.tx_bytes_per_second | mbps),(.rx_history | spark),(.tx_history | spark)]])'
+}
+
 interfaces_main() {
     if $INTERACTIVE; then
         [[ -t 0 && -t 2 ]] || fail 'interactive interface selection requires a terminal'
         VIEW_MODE=all
     fi
     start_router_session
+    if [[ $SUBCOMMAND == inspect ]]; then interface_inspect; return; fi
+    if $INTERFACE_RATES; then interface_rates; return; fi
     fetch_interface_status
     fetch_interface_traffic
     if $JSON_OUTPUT; then
@@ -2782,7 +3359,7 @@ interfaces_main() {
 
 wifi_main() {
     start_router_session
-    if [[ $SUBCOMMAND == monitor ]]; then wifi_monitor_main; return; fi
+    case $SUBCOMMAND in monitor) wifi_monitor_main; return ;; clients) wifi_clients_main; return ;; scan) wifi_scan_main; return ;; esac
     fetch_wifi_networks
     if $JSON_OUTPUT; then
         cat "$TMP_DIR/wifi.json"
@@ -2878,6 +3455,8 @@ run_command_once() {
         logs) logs_main ;;
         diagnose) diagnose_main ;;
         wake) wake_main ;;
+        wan) wan_main ;; dhcp) dhcp_main ;; routes) routes_main ;; mesh) mesh_main ;;
+        connections) connections_main ;; forwards) forwards_main ;; speedtest) speedtest_main ;;
     esac
 }
 

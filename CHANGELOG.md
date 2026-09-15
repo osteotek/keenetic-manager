@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.0 - 2026-09-15
+
+- Add WAN health with plain/encrypted DNS servers, global connection status, and reachability checks.
+- Add interface inspection and sampled RX/TX rates with per-session history graphs.
+- Add DHCP leases/reservations, IPv4/IPv6 routes, mesh members/backhaul, NAT connections, and forwarding rules.
+- Add detailed Wi-Fi station listings and nearby network surveys.
+- Add bounded router-side iPerf3 throughput tests with preview and cancellation.
+- Add client renaming and configuration change/save commands with dry runs and bounded verification.
+- Add `keenetic system reboot` with dry-run previews, single-request execution, and reboot response validation.
+
 ## 1.2.0 - 2026-09-15
 
 - Add refreshable read-only views with `--watch SECONDS`, terminal cleanup, and NDJSON snapshots.

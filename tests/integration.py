@@ -49,6 +49,257 @@ class RouterState:
         ]
         self.clients[0]["ap"] = "WifiMaster1/AccessPoint0"
         self.clients[1]["ssid"] = "Home"
+        self.extra = {'/rci/ip/dhcp/host': [{'ip': '192.0.2.12', 'mac': '02:11:22:33:44:55'},
+                               {'ip': '192.0.2.99', 'mac': '02:00:00:00:00:99'}],
+         '/rci/ip/static': [{'comment': 'Web',
+                             'disable': {'no': True},
+                             'interface': 'Bridge0',
+                             'port': 8080,
+                             'protocol': 'tcp',
+                             'to-host': '192.0.2.10',
+                             'to-port': 80},
+                            {'disable': True,
+                             'end-port': 5010,
+                             'interface': 'Bridge0',
+                             'port': 5000,
+                             'protocol': 'udp',
+                             'to-host': '192.0.2.20'}],
+         '/rci/show/associations': {'station': [{'ap': 'WifiMaster0/AccessPoint0',
+                                                 'authenticated': True,
+                                                 'ebf': False,
+                                                 'gi': 400,
+                                                 'ht': 40,
+                                                 'mac': '02:11:22:33:44:55',
+                                                 'mcs': 7,
+                                                 'mode': '11n',
+                                                 'psm': False,
+                                                 'rssi': -54,
+                                                 'rxbytes': 654321,
+                                                 'security': 'wpa2-psk',
+                                                 'txbytes': 123456,
+                                                 'txrate': 150,
+                                                 'txss': 1,
+                                                 'uptime': 3600},
+                                                {'ap': 'WifiMaster1/AccessPoint0',
+                                                 'authenticated': True,
+                                                 'dl-mu': True,
+                                                 'dl-ofdma': True,
+                                                 'gi': 800,
+                                                 'ht': 80,
+                                                 'mac': '02:aa:bb:cc:dd:ee',
+                                                 'mcs': 5,
+                                                 'mode': '11ax',
+                                                 'rssi': -38,
+                                                 'rxbytes': 84,
+                                                 'security': 'future-suite',
+                                                 'txbytes': 42,
+                                                 'txrate': 1201,
+                                                 'txss': 2,
+                                                 'uptime': 12}]},
+         '/rci/show/dns-proxy': {'proxy-status': [{'proxy-https': {'server-https': [{'interface': 'Bridge0',
+                                                                                     'uri': 'https://user:must-not-be-output@dns.example/dns-query?key=must-not-be-output'}]}}]},
+         '/rci/show/internet/status': {'captive': {'address': '192.0.2.2', 'resolved': True},
+                                       'captive-accessible': True,
+                                       'checked': 'Thu Jan  1 00:00:00 2026',
+                                       'dns-accessible': True,
+                                       'enabled': True,
+                                       'gateway': {'accessible': True,
+                                                   'address': '192.0.2.1',
+                                                   'interface': 'Fixture0'},
+                                       'gateway-accessible': True,
+                                       'internet': True,
+                                       'reliable': True},
+         '/rci/show/ip/dhcp/bindings': {'lease': [{'expires': 1800,
+                                                   'hostname': 'wireless-client',
+                                                   'ip': '192.0.2.10',
+                                                   'mac': '02:11:22:33:44:55',
+                                                   'name': 'Laptop',
+                                                   'via': '02:11:22:33:44:55'},
+                                                  {'expires': 'infinity',
+                                                   'hostname': '',
+                                                   'ip': '192.0.2.12',
+                                                   'mac': '02:11:22:33:44:55',
+                                                   'name': 'Laptop old lease',
+                                                   'via': '02:11:22:33:44:55'},
+                                                  {'device': 'Bridge0',
+                                                   'expires': 2400,
+                                                   'hostname': 'extender',
+                                                   'ip': '192.0.2.40',
+                                                   'mac': '02:00:00:00:00:40',
+                                                   'mode': 'extender',
+                                                   'name': 'Mesh extender',
+                                                   'via': '02:00:00:00:00:41'}]},
+         '/rci/show/ip/name-server': {'server': [{'address': '192.0.2.53',
+                                                  'domain': '',
+                                                  'global': 0,
+                                                  'interface': '',
+                                                  'service': ''},
+                                                 {'address': '2001:db8::53',
+                                                  'domain': 'example.invalid',
+                                                  'global': 61481,
+                                                  'interface': 'GigabitEthernet0/Vlan2',
+                                                  'service': 'Dns::InterfaceSpecific-GigabitEthernet0/Vlan2'}]},
+         '/rci/show/ip/nat': [{'bytes': 2048,
+                               'bytes-out': 4096,
+                               'dport': 443,
+                               'dst': '198.51.100.1',
+                               'packets': 4,
+                               'protocol': 'tcp',
+                               'sport': 54321,
+                               'src': '192.0.2.10'},
+                              {'dport': 5000,
+                               'dport-out': 5001,
+                               'dst': '192.0.2.1',
+                               'dst-out': '192.0.2.10',
+                               'protocol': 'udp',
+                               'sport': 40000,
+                               'src': '198.51.100.2'},
+                              {'dport': 443,
+                               'dst': '198.51.100.3',
+                               'protocol': 'tcp',
+                               'sport': 54322,
+                               'src': '192.0.2.20'}],
+         '/rci/show/ip/route': [{'destination': '0.0.0.0/0',
+                                 'flags': 'UG',
+                                 'floating': True,
+                                 'gateway': '192.0.2.1',
+                                 'interface': 'GigabitEthernet0/Vlan2',
+                                 'metric': 1000,
+                                 'proto': 'boot',
+                                 'rejecting': False,
+                                 'static': False},
+                                {'destination': '192.0.2.0/24',
+                                 'flags': 'U',
+                                 'floating': False,
+                                 'gateway': '0.0.0.0',
+                                 'interface': 'Bridge0',
+                                 'metric': 0,
+                                 'proto': 'kernel',
+                                 'rejecting': False,
+                                 'static': False},
+                                {'destination': '198.51.100.0/24',
+                                 'flags': 'UX',
+                                 'floating': False,
+                                 'gateway': '192.0.2.254',
+                                 'interface': 'Wireguard0',
+                                 'metric': 10,
+                                 'proto': 'future-protocol',
+                                 'rejecting': False,
+                                 'static': True}],
+         '/rci/show/ipv6/route': {'route6': [{'destination': '2001:db8:1::/64',
+                                              'flags': 'U',
+                                              'floating': False,
+                                              'gateway': '::',
+                                              'interface': 'Bridge0',
+                                              'metric': 256,
+                                              'proto': 'kernel',
+                                              'rejecting': False,
+                                              'static': False},
+                                             {'destination': '::/0',
+                                              'flags': 'UG',
+                                              'floating': False,
+                                              'gateway': '2001:db8:1::1',
+                                              'interface': 'GigabitEthernet0/Vlan2',
+                                              'metric': 1024,
+                                              'proto': 'boot',
+                                              'rejecting': False,
+                                              'static': False}]},
+         '/rci/show/last-change': {'agent': 'http/rci',
+                                   'checksum': 'fixture',
+                                   'date': 'Sep 15 12:00:00',
+                                   'fail-safe': {'blocked': False,
+                                                 'rollback': False,
+                                                 'time-left': 0,
+                                                 'unsaved': True},
+                                   'user': 'admin'},
+         '/rci/show/mws/member': [{'associations': 1,
+                                   'backhaul': {'ap': 'WifiMaster1/Backhaul0',
+                                                'authenticated': True,
+                                                'bridge': '8000.02:00:00:00:00:01',
+                                                'cost': 50,
+                                                'dl-mu': True,
+                                                'dl-ofdma': True,
+                                                'ebf': True,
+                                                'gi': 800,
+                                                'ht': 80,
+                                                'mcs': 3,
+                                                'mld': False,
+                                                'mode': '11ax',
+                                                'pmf': True,
+                                                'psm': False,
+                                                'root': '8000.02:00:00:00:00:01',
+                                                'rssi': -70,
+                                                'security': 'wpa3-psk',
+                                                'txrate': 288,
+                                                'txss': 2,
+                                                'ul-mu': True,
+                                                'uplink': 'WifiMaster1/WifiStation0',
+                                                'uptime': 396348},
+                                   'cid': '11111111-2222-4333-8444-555555555555',
+                                   'fw': '5.1.3',
+                                   'fw-available': '5.1.3',
+                                   'fw-release': '5.01.C.3.0-1',
+                                   'fw-release-available': '5.01.C.3.0-1',
+                                   'fw-update-sandbox': 'stable',
+                                   'hw_id': 'KN-3411',
+                                   'hw_type': 'extender',
+                                   'internet-available': True,
+                                   'ip': '192.0.2.62',
+                                   'known-host': 'fixture-extender',
+                                   'mac': '02:00:00:00:00:62',
+                                   'mode': 'extender',
+                                   'model': 'Fixture Extender',
+                                   'port': [{'appearance': 'gray-rj45', 'label': '1', 'link': 'down'}],
+                                   'rci': {'errors': 0},
+                                   'region': 'EA',
+                                   'system': {'cpuload': 1, 'memory': '170136/262144', 'uptime': '829958'},
+                                   'wireless': {'band': [{'index': '0'}, {'index': '1'}]}}],
+         '/rci/show/mws/status': {'auto-update': False, 'controller': {'update-pending': False}},
+         '/rci/show/ping-check': {'pingcheck': [{'interface': {'UsbLte0': {'failcount': 0,
+                                                                           'ignore-fail': False,
+                                                                           'status': 'not ready',
+                                                                           'successcount': 0}},
+                                                 'profile': 'default'},
+                                                {'host': ['resolver.example'],
+                                                 'interface': {'GigabitEthernet0/Vlan2': {'failcount': 0,
+                                                                                          'ignore-fail': False,
+                                                                                          'ipcache': [{'addresses': ['192.0.2.53',
+                                                                                                                     '2001:db8::53'],
+                                                                                                       'host': 'resolver.example'}],
+                                                                                          'status': 'pass',
+                                                                                          'successcount': 56}},
+                                                 'max-fails': 5,
+                                                 'mode': 'icmp',
+                                                 'profile': 'icmp-uplink',
+                                                 'update-interval': 10},
+                                                {'host': ['198.51.100.10'],
+                                                 'interface': {},
+                                                 'max-fails': 7,
+                                                 'mode': 'connect',
+                                                 'port': 443,
+                                                 'profile': 'tcp-uplink',
+                                                 'timeout': 2}]}}
+        self.extra_status = {}
+        self.save_posts = []
+        self.save_delay = 0
+        self.save_pending = None
+        self.save_drop_update = False
+        self.rename_posts = []
+        self.rename_delay = 0
+        self.rename_pending = None
+        self.rename_drop_update = False
+        self.write_reply = {"status": [{"status": "message", "message": "Applied."}]}
+        self.rate_step = 0
+        self.scan_posts = []
+        self.scan_reply = {"show": {"site-survey": {"ap_cell": [
+            {"address": "02:00:00:00:11:01", "essid": "邻居 Wi-Fi", "channel": 1, "rssi": -40,
+             "encryption": "on", "encryption-mode": "WPA3", "ieee": "11ax", "bandwidth": "80", "password": "must-not-be-output"},
+            {"address": "02:00:00:00:11:02", "essid": "", "channel": 6, "rssi": -80} ]}}}
+        self.reboot_posts = []
+        self.reboot_status = 200
+        self.reboot_reply = {"system": {"reboot": {"status": [{"status": "message", "message": "Rebooting."}]}}}
+        self.reboot_drop_response = False
+        self.system_gets = 0
         self.system = {"hostname": "Router", "uptime": "90061", "cpuload": 7,
                        "memory": "128/1024", "memtotal": 1024, "memfree": 700,
                        "conntotal": 1000, "connfree": 900}
@@ -209,7 +460,24 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not self.authenticated():
             self.reply(401, {"message": "authentication required"})
+        elif self.path in STATE.extra:
+            if self.path == "/rci/show/last-change" and STATE.save_pending is not None:
+                if STATE.save_pending == 0:
+                    STATE.extra[self.path]["fail-safe"]["unsaved"] = False
+                    STATE.save_pending = None
+                else:
+                    STATE.save_pending -= 1
+            self.reply(STATE.extra_status.get(self.path, 200), STATE.extra[self.path])
         elif self.path == "/rci/show/ip/hotspot/host":
+            if STATE.rename_pending:
+                mac, name, remaining = STATE.rename_pending
+                if remaining == 0:
+                    for client in STATE.clients:
+                        if client["mac"].lower() == mac:
+                            client["name"] = name
+                    STATE.rename_pending = None
+                else:
+                    STATE.rename_pending = (mac, name, remaining - 1)
             self.reply(STATE.clients_status, STATE.clients)
         elif urlsplit(self.path).path == "/rci/show/ip/hotspot/summary":
             query = parse_qs(urlsplit(self.path).query)
@@ -241,6 +509,7 @@ class Handler(BaseHTTPRequestHandler):
                     STATE.pending_interface_update = (ident, state, remaining - 1)
             self.reply(STATE.interface_status, STATE.interfaces)
         elif self.path == "/rci/show/system":
+            STATE.system_gets += 1
             self.reply(200, STATE.system)
         elif self.path == "/rci/show/version":
             self.reply(200, STATE.version)
@@ -276,6 +545,30 @@ class Handler(BaseHTTPRequestHandler):
             STATE.diagnostic_posts.append((self.path, body))
             self.reply(200, {"message": 5 if STATE.diagnostic_invalid else ["started"], "continued": True})
         elif self.path == "/rci/":
+            if isinstance(body, dict) and "known" in body:
+                STATE.rename_posts.append(body)
+                host = body["known"]["host"]
+                if not STATE.rename_drop_update:
+                    STATE.rename_pending = (host["mac"], host["name"], STATE.rename_delay)
+                self.reply(200, STATE.write_reply)
+                return
+            if body == {"system": {"configuration": {"save": {}}}}:
+                STATE.save_posts.append(body)
+                if not STATE.save_drop_update:
+                    STATE.save_pending = STATE.save_delay
+                self.reply(200, STATE.write_reply)
+                return
+            if isinstance(body, dict) and "site-survey" in body.get("show", {}):
+                STATE.scan_posts.append(body)
+                self.reply(200, STATE.scan_reply)
+                return
+            if isinstance(body, dict) and "system" in body:
+                STATE.reboot_posts.append(body)
+                if STATE.reboot_drop_response:
+                    self.close_connection = True
+                    return
+                self.reply(STATE.reboot_status, STATE.reboot_reply)
+                return
             if isinstance(body, dict) and "interface" in body:
                 STATE.interface_posts.append(body)
                 check(list(body) == ["interface"] and len(body["interface"]) == 1,
@@ -296,6 +589,9 @@ class Handler(BaseHTTPRequestHandler):
                 check(command == {"show": {"interface": {"name": name, "stat": {}}}},
                       "statistics request contains a non-show command")
                 stat_data = STATE.stats.get(name, {"rxbytes": 0, "txbytes": 0})
+                if STATE.rate_step and name == "Bridge0":
+                    stat_data["rxbytes"] += STATE.rate_step
+                    stat_data["txbytes"] += STATE.rate_step * 2
                 results.append({"show": {"interface": {"stat": stat_data}}})
             self.reply(STATE.stats_status, STATE.stats_override if STATE.stats_override is not None else results)
         elif self.path == "/rci/ip/hotspot/host":
@@ -381,8 +677,9 @@ def termios_size(rows, columns):
 
 
 def finish_pty(process, master):
-    output = read_pty(master, timeout=2)
-    process.wait(timeout=8)
+    # Drain until EOF, including output produced by delayed verification reads.
+    output = read_pty(master, timeout=10)
+    process.wait(timeout=2)
     os.close(master)
     return output
 
@@ -445,7 +742,7 @@ def main():
             index = 1
 
             result = subprocess.run([str(SCRIPT), "--version"], cwd=ROOT, text=True, capture_output=True)
-            check(result.returncode == 0 and result.stdout.strip().endswith("1.2.0"), "version output")
+            check(result.returncode == 0 and result.stdout.strip().endswith("1.3.0"), "version output")
             report(index, "version output"); index += 1
 
             root_env = base_env(temp / "missing-config")
@@ -478,7 +775,7 @@ def main():
                 (["traffic", "Laptop"], 2, "unknown option for traffic"),
                 (["interfaces", "--offline"], 2, "unknown option for interfaces"),
                 (["interfaces", "--client", "Laptop"], 2, "unknown option for interfaces"),
-                (["interfaces", "Wireguard0"], 2, "unknown option for interfaces"),
+                (["interfaces", "Wireguard0"], 2, "use interfaces inspect ID"),
                 (["interfaces", "--json", "--interactive"], 2, "non-interactive listings"),
                 (["interfaces", "--dry-run"], 2, "--dry-run requires"),
                 (["--json"], 1, "--init"),
@@ -497,8 +794,8 @@ def main():
                 (["--help", "policy"], 0, "keenetic policy --interactive"),
                 (["--verbose", "wake", "--help"], 0, "wake SELECTOR"),
                 (["--help", "wake"], 0, "wake SELECTOR"),
-                (["--version", "policy"], 0, "keenetic 1.2.0"),
-                (["wake", "--version"], 0, "keenetic 1.2.0"),
+                (["--version", "policy"], 0, "keenetic 1.3.0"),
+                (["wake", "--version"], 0, "keenetic 1.3.0"),
                 (["wake"], 2, "requires at least one"),
                 (["wake", "--json"], 2, "unknown option for wake"),
                 (["wake", "--policy", "VPN"], 2, "unknown option for wake"),
@@ -689,7 +986,7 @@ def main():
                 STATE.clients_status, STATE.clients = status, body
                 result = run(config, "--json", subcommand=None)
                 check(result.returncode == 0 and json.loads(result.stdout)["clients"] is None,
-                      "unavailable client counts were reported as zero")
+                      f"unavailable client counts: exit={result.returncode}, stdout={result.stdout}, stderr={result.stderr}")
                 check("Connected client counts unavailable" in result.stderr, "missing client count diagnostic")
             STATE.clients_status, STATE.clients = 200, saved_clients
             report(index, "wired/wireless connected-client summary and unavailable counts"); index += 1
@@ -1362,6 +1659,262 @@ def main():
             check(run(tls_config, "--ca-file", str(ca_cert), "--insecure").returncode == 2, "TLS conflict")
             report(index, "real HTTPS trust, custom CA, and insecure transport"); index += 1
 
+            original_interfaces_new = json.loads(json.dumps(STATE.interfaces))
+            STATE.interfaces["Bridge0"].update(global_=True, mtu=1500, priority=100, defaultgw=True,
+                                              port={"id": "GigabitEthernet0/0", "label": "LAN", "speed": "1000", "duplex": "full", "link": "up"})
+            STATE.interfaces["Bridge0"]["global"] = True
+            STATE.interfaces["Wireguard0"]["global"] = True
+            STATE.interfaces["WifiMaster0"] = {"type": "WifiMaster", "state": "up"}
+            STATE.interfaces["WifiMaster1"] = {"type": "WifiMaster", "state": "down"}
+            before = STATE.authenticated_requests
+            for command, args in [("wan", ["--all"]), ("dhcp", ["anything"]), ("routes", ["--interactive"]),
+                                  ("mesh", ["--client", "Laptop"]), ("forwards", ["--dry-run"]),
+                                  ("connections", ["--client", ""]), ("connections", ["--client", "Laptop", "--client", "Phone"]),
+                                  ("interfaces", ["inspect"]), ("interfaces", ["inspect", "Bridge0", "--rates"]),
+                                  ("interfaces", ["--sample", "2"]), ("interfaces", ["--sample", "1"]),
+                                  ("policy", ["--rates"]), ("policy", ["--server", "host"]),
+                                  ("policy", ["--server=host"]), ("policy", ["--reverse"]), ("interfaces", ["--rates", "--sample", "0"]),
+                                  ("wifi", ["scan", "--watch", "1", "--json"]), ("wifi", ["--radio", "WifiMaster0"]),
+                                  ("clients", ["rename", "Laptop", ""]), ("clients", ["rename", "Laptop", "bad\nname"]),
+                                  ("clients", ["rename", "Laptop", "New", "--watch", "1"]),
+                                  ("clients", ["rename", "Laptop", "New", "--json"]), ("system", ["save", "--watch", "1"]),
+                                  ("system", ["changes", "--dry-run"]), ("speedtest", []),
+                                  ("speedtest", ["--server", "-bad"]), ("speedtest", ["--server", "host", "--duration", "31"]),
+                                  ("speedtest", ["--server", "host", "--port", "65536"]),
+                                  ("speedtest", ["--server", "host", "--watch", "1", "--json"])]:
+                check(run(config, *args, subcommand=command).returncode == 2, f"invalid new options: {command} {args}")
+            for command in ("wan", "dhcp", "routes", "mesh", "connections", "forwards", "speedtest"):
+                help_result = run(config, "--help", subcommand=command)
+                check(help_result.returncode == 0 and f" {command}" in help_result.stdout, f"help for {command}")
+            check(STATE.authenticated_requests == before, "new option guards contacted router")
+            report(index, "new command help and option preflight"); index += 1
+
+            wan = run(config, "--json", subcommand="wan")
+            check(wan.returncode == 0, wan.stderr)
+            summary = json.loads(wan.stdout)
+            check(summary["internet"] and len(summary["connections"]) == 2, "WAN connections")
+            check(any(d["address"] == "dns.example" and d["transport"] == "HTTPS" for d in summary["dns_servers"]), "encrypted DNS")
+            check("must-not-be-output" not in wan.stdout, "DNS URL credentials leaked")
+            check(summary["checks"][1]["status"] == "pass", "WAN ping checks")
+            routes = run(config, "--json", subcommand="routes")
+            check(routes.returncode == 0, routes.stderr)
+            check({r["family"] for r in json.loads(routes.stdout)["routes"]} == {4, 6}, "dual stack routes")
+            STATE.extra_status["/rci/show/ipv6/route"] = 404
+            partial = run(config, "--json", subcommand="routes")
+            check(partial.returncode == 0 and not json.loads(partial.stdout)["ipv6_available"], "IPv6 unavailable")
+            STATE.extra_status.clear()
+            report(index, "WAN health, encrypted DNS redaction, and dual-stack routes"); index += 1
+
+            dhcp = run(config, "--json", subcommand="dhcp")
+            check(dhcp.returncode == 0, dhcp.stderr)
+            leases = json.loads(dhcp.stdout)["leases"]
+            check(leases[0]["assignment"] == "dynamic" and leases[1]["assignment"] == "static", "DHCP assignment classification")
+            check(leases[1]["infinite"] and leases[1]["expires_seconds"] is None, "infinite lease serialization")
+            check(not leases[-1]["lease_present"] and leases[-1]["ip"] == "192.0.2.99", "unleased reservation missing")
+            mesh = run(config, "--json", subcommand="mesh")
+            check(mesh.returncode == 0, mesh.stderr)
+            node = json.loads(mesh.stdout)["members"][0]
+            check(node["parent"] == "8000.02:00:00:00:00:01" and node["signal_dbm"] == -70, "mesh backhaul")
+            original_members = STATE.extra["/rci/show/mws/member"]
+            STATE.extra["/rci/show/mws/member"] = {}
+            check(json.loads(run(config, "--json", subcommand="mesh").stdout)["members"] == [], "empty mesh object")
+            STATE.extra["/rci/show/mws/member"] = original_members
+            report(index, "DHCP reservations, lease expiry, and mesh backhaul"); index += 1
+
+            stations = run(config, "clients", "--json", subcommand="wifi")
+            check(stations.returncode == 0, stations.stderr)
+            station = json.loads(stations.stdout)["clients"][0]
+            check(station["spatial_streams"] == 1 and station["channel_width_mhz"] == 40 and station["signal_dbm"] == -54,
+                  "Wi-Fi station detail")
+            scan = run(config, "scan", "--json", subcommand="wifi")
+            check(scan.returncode == 0, scan.stderr)
+            check(STATE.scan_posts == [{"show": {"site-survey": {"name": "WifiMaster0"}}}], "survey radios")
+            check("must-not-be-output" not in scan.stdout and json.loads(scan.stdout)["networks"][0]["signal_dbm"] == -40, "survey sort/whitelist")
+            check(run(config, "scan", "--radio", "WifiMaster1", "--json", subcommand="wifi").returncode == 0, "explicit scan radio")
+            before = len(STATE.scan_posts)
+            check(run(config, "scan", "--radio", "Missing", subcommand="wifi").returncode == 2 and len(STATE.scan_posts) == before,
+                  "unknown scan radio")
+            report(index, "Wi-Fi station details, scan selection, and secret exclusion"); index += 1
+
+            connections = run(config, "--client", "Laptop", "--json", subcommand="connections")
+            check(connections.returncode == 0, connections.stderr)
+            flows = json.loads(connections.stdout)["connections"]
+            check(len(flows) == 2 and flows[1]["translated_destination"] == "192.0.2.10", "NAT reverse matching")
+            check(run(config, "--client", "Phone", subcommand="connections").returncode == 3, "ambiguous NAT client")
+            forwards = run(config, "--json", subcommand="forwards")
+            check(forwards.returncode == 0, forwards.stderr)
+            rules = json.loads(forwards.stdout)["rules"]
+            check(rules[0]["enabled"] and not rules[1]["enabled"] and rules[1]["end_port"] == 5010, "forward state and ranges")
+            inspected = run(config, "inspect", "Bridge0", "--json", subcommand="interfaces")
+            check(inspected.returncode == 0, inspected.stderr)
+            iface = json.loads(inspected.stdout)["interface"]
+            check(iface["mtu"] == 1500 and iface["speed_mbps"] == 1000 and iface["traffic"]["tx_errors"] == 1, "detailed interface counters/port")
+            check("must-not-be-output" not in run(config, "inspect", "Wireguard0", "--json", subcommand="interfaces").stdout, "interface secret")
+            report(index, "NAT filtering, forwarding ranges, and interface details"); index += 1
+
+            original_stats_new = json.loads(json.dumps(STATE.stats))
+            STATE.rate_step = 1000000
+            rates = run(config, "--rates", "--json", subcommand="interfaces")
+            check(rates.returncode == 0, rates.stderr)
+            rates_doc = json.loads(rates.stdout)
+            row = next(r for r in rates_doc["interfaces"] if r["id"] == "Bridge0")
+            check(row["rx_bytes_per_second"] == 1000000 / rates_doc["sample_seconds"] and len(row["rx_history"]) == 1, "rate delta/time")
+            STATE.rate_step = -1000000
+            reset = run(config, "--rates", "--json", subcommand="interfaces")
+            check(reset.returncode == 0, reset.stderr)
+            row = next(r for r in json.loads(reset.stdout)["interfaces"] if r["id"] == "Bridge0")
+            check(row["rx_bytes_per_second"] is None and row["rx_history"] == [], "counter reset emitted false rate")
+            STATE.rate_step = 1000
+            process = subprocess.Popen([str(SCRIPT), "interfaces", "--rates", "--watch", "1", "--json"],
+                                       env=base_env(config), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                frames = []
+                for _ in range(2):
+                    check(select.select([process.stdout], [], [], 8)[0], "rate watch timeout")
+                    frames.append(json.loads(process.stdout.readline()))
+                check(len(next(r for r in frames[1]["interfaces"] if r["id"] == "Bridge0")["rx_history"]) == 2, "watch rate history")
+            finally:
+                process.send_signal(signal.SIGINT)
+                process.communicate(timeout=8)
+            STATE.rate_step = 0
+            STATE.stats = original_stats_new
+            report(index, "sampled rates, counter resets, and watch history"); index += 1
+
+            changes = run(config, "changes", "--json", subcommand="system")
+            check(changes.returncode == 0 and json.loads(changes.stdout)["unsaved"], "configuration change state")
+            preview = run(config, "save", "--dry-run", subcommand="system")
+            check(preview.returncode == 0 and not STATE.save_posts, "save dry-run wrote configuration")
+            STATE.save_delay = 2
+            saved = run(config, "save", subcommand="system")
+            check(saved.returncode == 0 and "saved and verified" in saved.stdout, saved.stderr)
+            check(STATE.save_posts == [{"system": {"configuration": {"save": {}}}}], "save payload/retry")
+            check(run(config, "save", subcommand="system").returncode == 0 and len(STATE.save_posts) == 1, "already-saved wrote again")
+            STATE.extra["/rci/show/last-change"]["fail-safe"]["unsaved"] = True
+            STATE.save_drop_update = True
+            check(run(config, "save", subcommand="system").returncode == 5, "unverified save accepted")
+            STATE.save_drop_update = False
+            STATE.save_delay = 0
+            report(index, "configuration save preview, single write, and delayed verification"); index += 1
+
+            original_clients_new = json.loads(json.dumps(STATE.clients))
+            tricky_name = 'New "设备" $(touch NEVER_EXECUTE)'
+            renamed = run(config, "rename", "Laptop", tricky_name, "--dry-run", subcommand="clients")
+            check(renamed.returncode == 0 and not STATE.rename_posts, "rename preview mutated")
+            STATE.rename_delay = 2
+            renamed = run(config, "rename", "Laptop", tricky_name, subcommand="clients")
+            check(renamed.returncode == 0, renamed.stderr)
+            check(STATE.rename_posts == [{"known": {"host": {"mac": "02:00:00:00:00:10", "name": tricky_name}}}], "rename escaping/payload")
+            check(not (ROOT / "NEVER_EXECUTE").exists(), "rename executed shell text")
+            before = len(STATE.rename_posts)
+            check(run(config, "rename", "192.0.2.10", tricky_name, subcommand="clients").returncode == 0
+                  and len(STATE.rename_posts) == before, "unchanged rename wrote")
+            STATE.rename_drop_update = True
+            check(run(config, "rename", "192.0.2.10", "New name", subcommand="clients").returncode == 5, "unverified rename accepted")
+            STATE.rename_drop_update = False
+            STATE.rename_delay = 0
+            STATE.clients = original_clients_new
+            report(index, "client rename preview, escaping, idempotence, and verification"); index += 1
+
+            before = len(STATE.diagnostic_posts)
+            preview = run(config, "--server", "127.0.0.1", "--dry-run", subcommand="speedtest")
+            check(preview.returncode == 0 and len(STATE.diagnostic_posts) == before, "speedtest preview started traffic")
+            throughput = run(config, "--server", "::1", "--port", "5202", "--duration", "2", "--reverse",
+                             "--interface", "Bridge0", "--json", subcommand="speedtest")
+            check(throughput.returncode == 0, throughput.stderr)
+            check(STATE.diagnostic_posts[-1] == ("/rci/tools/iperf3", {"host": "::1", "tcp": True, "ipv6": True,
+                  "port": 5202, "time": 2, "reverse": True, "source-interface": "Bridge0"}), "iperf3 request")
+            check(json.loads(throughput.stdout)["test"]["lines"] == ["started", "reply"], "iperf polling")
+            STATE.diagnostic_continues = True
+            before = len(STATE.diagnostic_posts)
+            process = subprocess.Popen([str(SCRIPT), "speedtest", "--server", "localhost", "--json"],
+                                       env=base_env(config), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                deadline = time.monotonic() + 8
+                while len(STATE.diagnostic_posts) == before and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                check(len(STATE.diagnostic_posts) > before, "iperf did not start")
+                time.sleep(0.2)
+            finally:
+                process.send_signal(signal.SIGINT)
+                process.communicate(timeout=8)
+            check(STATE.diagnostic_cancelled[-1] == "/rci/tools/iperf3", "iperf cancellation")
+            STATE.diagnostic_continues = False
+            report(index, "iPerf3 options, preview, polling, and cancellation"); index += 1
+
+            for command, args, endpoint, bad in [
+                    ("wan", [], "/rci/show/internet/status", {"status": [{"status": "error"}]}),
+                    ("dhcp", [], "/rci/show/ip/dhcp/bindings", {"lease": "invalid"}),
+                    ("routes", [], "/rci/show/ip/route", {}),
+                    ("mesh", [], "/rci/show/mws/member", ["invalid"]),
+                    ("wifi", ["clients"], "/rci/show/associations", {"station": "invalid"}),
+                    ("connections", [], "/rci/show/ip/nat", {}),
+                    ("forwards", [], "/rci/ip/static", ["invalid"]),
+                    ("system", ["changes"], "/rci/show/last-change", {})]:
+                original = STATE.extra[endpoint]
+                STATE.extra[endpoint] = bad
+                check(run(config, *args, "--json", subcommand=command).returncode != 0, f"malformed {command} accepted")
+                STATE.extra[endpoint] = original
+            report(index, "new view schema failures remain explicit"); index += 1
+
+            for width in (20, 40, 80, 120):
+                for command, args in [("wan", []), ("dhcp", []), ("routes", []), ("mesh", []),
+                                      ("wifi", ["clients"]), ("wifi", ["scan"]), ("connections", []), ("forwards", []),
+                                      ("interfaces", ["inspect", "Bridge0"]), ("system", ["changes"])]:
+                    rendered = run(config, *args, subcommand=command, extra_env={"COLUMNS": str(width)})
+                    check(rendered.returncode == 0, rendered.stderr)
+                    check(all(display_width(ANSI.sub("", line)) <= width for line in rendered.stdout.splitlines()),
+                          f"new {command} overflow at {width}: {rendered.stdout}")
+            rendered = run(config, "--rates", subcommand="interfaces", extra_env={"COLUMNS": "40"})
+            check(rendered.returncode == 0, rendered.stderr)
+            STATE.interfaces = original_interfaces_new
+            report(index, "all new reports fit narrow and wide terminals"); index += 1
+
+            before = STATE.authenticated_requests
+            for args in (["reboot", "--watch", "1"], ["reboot", "--watch", "1", "--json"],
+                         ["reboot", "--json"], ["reboot", "--dry-run", "--json"], ["reboot", "extra"],
+                         ["reboot", "reboot"], ["--dry-run"], ["restart"], ["reboot", "--all"],
+                         ["reboot", "--interactive"], ["reboot", "--policy", "VPN"]):
+                check(run(config, *args, subcommand="system").returncode == 2, f"invalid reboot options: {args}")
+            check(run(config, "--watch", "1", "system", "reboot", subcommand=None).returncode == 2,
+                  "global watch allowed reboot")
+            help_result = run(config, "reboot", "--help", subcommand="system")
+            check(help_result.returncode == 0 and "system reboot" in help_result.stdout, "reboot help")
+            check(STATE.authenticated_requests == before and not STATE.reboot_posts, "invalid reboot contacted router")
+            report(index, "reboot help and preflight option guards"); index += 1
+
+            before_reads = STATE.system_gets
+            before_hosts, before_interfaces = len(STATE.host_posts), len(STATE.interface_posts)
+            preview = run(config, "reboot", "--dry-run", subcommand="system")
+            check(preview.returncode == 0 and "Would request an immediate reboot of" in preview.stdout, preview.stderr)
+            check(not STATE.reboot_posts, "dry-run rebooted router")
+            reboot = run(config, "reboot", subcommand="system")
+            check(reboot.returncode == 0 and "Reboot request accepted" in reboot.stdout, reboot.stderr)
+            check(STATE.reboot_posts == [{"system": {"reboot": {}}}], "unexpected reboot request or retry")
+            quiet = run(config, "reboot", "--quiet", subcommand="system")
+            check(quiet.returncode == 0 and not quiet.stdout, "quiet reboot")
+            check(STATE.system_gets == before_reads, "reboot fetched or polled health")
+            check(len(STATE.host_posts) == before_hosts and len(STATE.interface_posts) == before_interfaces,
+                  "reboot mutated client/interface configuration")
+            report(index, "single reboot request, dry-run, and quiet output"); index += 1
+
+            original_reboot = STATE.reboot_reply
+            for http_status, reply in [(403, {"message": "denied"}), (500, {"message": "failed"}),
+                                       (200, {"system": {"reboot": {"status": [{"status": "error"}]}}}),
+                                       (200, []), (200, None), (200, "invalid")]:
+                STATE.reboot_status, STATE.reboot_reply = http_status, reply
+                before = len(STATE.reboot_posts)
+                failed = run(config, "reboot", subcommand="system")
+                check(failed.returncode == 1 and "Reboot request accepted" not in failed.stdout, failed.stdout)
+                check(len(STATE.reboot_posts) == before + 1, "failed reboot retried")
+            STATE.reboot_status, STATE.reboot_reply = 200, original_reboot
+            STATE.reboot_drop_response = True
+            before = len(STATE.reboot_posts)
+            lost = run(config, "reboot", subcommand="system")
+            check(lost.returncode == 1 and "may already be rebooting" in lost.stderr, lost.stderr)
+            check(not lost.stdout and len(STATE.reboot_posts) == before + 1, "lost reboot response retried/succeeded")
+            STATE.reboot_drop_response = False
+            report(index, "reboot errors and ambiguous dropped response without retries"); index += 1
+
             # New status commands use whitelisted payloads and the same responsive renderer.
             system = run(config, "--json", subcommand="system")
             check(system.returncode == 0, system.stderr)
@@ -1497,7 +2050,24 @@ def main():
             report(index, "responsive report widths from 20 to 120 columns"); index += 1
 
             for words, word_index, expected in (
+                ("keenetic wan --js", 2, "--json"),
+                ("keenetic connections --cli", 2, "--client"),
+                ("keenetic speedtest --ser", 2, "--server"),
+                ("keenetic interfaces --rat", 2, "--rates"),
+                ("keenetic interfaces inspect Bridge0 --js", 4, "--json"),
+                ("keenetic wifi cl", 2, "clients"),
+                ("keenetic wifi scan --rad", 3, "--radio"),
+                ("keenetic wifi scan --wa", 3, None),
+                ("keenetic clients rename Laptop New --dry", 5, "--dry-run"),
+                ("keenetic system sa", 2, "save"),
+                ("keenetic system save --js", 3, None),
                 ("keenetic sys", 1, "system"),
+                ("keenetic system re", 2, "reboot"),
+                ("keenetic system reboot --dry", 3, "--dry-run"),
+                ("keenetic system reboot --wa", 3, None),
+                ("keenetic system reboot --js", 3, None),
+                ("keenetic --router reboot system re", 4, "reboot"),
+                ("keenetic system --router reboot --wa", 4, "--watch"),
                 ("keenetic clients ins", 2, "inspect"),
                 ("keenetic policy ins", 2, "inspect"),
                 ("keenetic wifi mon", 2, "monitor"),

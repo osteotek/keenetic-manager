@@ -11,7 +11,7 @@ _keenetic() {
         word=${COMP_WORDS[index]}
         case $word in
             --) return 0 ;;
-            --router|--ca-file|--client|--ip|--mac|--policy|--top|--period|--watch|--interface|--limit|--filter)
+            --router|--ca-file|--client|--ip|--mac|--policy|--top|--period|--watch|--interface|--limit|--filter|--server|--port|--duration|--sample|--radio)
                 if ((index + 1 == COMP_CWORD)); then
                     if [[ $word == --ca-file ]]; then
                         mapfile -t COMPREPLY < <(compgen -f -- "$current")
@@ -23,7 +23,16 @@ _keenetic() {
                 index=$((index + 1))
                 ;;
             --init|--discover) setup=true ;;
-            policy|wake|interfaces|traffic|wifi|clients|system|vpn|diagnose|logs)
+            reboot|save)
+                [[ $scope != root ]] || return 0
+                [[ $scope != system ]] || scope=system_action
+                ;;
+            scan) [[ $scope != wifi ]] || scope=wifi_scan ;;
+            inspect) [[ $scope != interfaces ]] || scope=interface_inspect ;;
+            rename) [[ $scope != clients ]] || scope=clients_rename ;;
+            clients)
+                if [[ $scope == root ]]; then scope=clients; elif [[ $scope == wifi ]]; then scope=wifi_clients; fi ;;
+            policy|wake|interfaces|traffic|wifi|system|vpn|diagnose|logs|wan|dhcp|routes|mesh|speedtest|connections|forwards)
                 [[ $scope != root ]] || scope=$word
                 ;;
             -*) ;;
@@ -34,22 +43,28 @@ _keenetic() {
     case $scope in
         root)
             options="--init --discover $global_options"
-            $setup || options="policy wake interfaces traffic wifi clients system vpn diagnose logs --watch --all --json $options"
+            $setup || options="policy wake interfaces traffic wifi clients system vpn diagnose logs wan dhcp routes mesh speedtest connections forwards --watch --all --json $options"
             ;;
         policy)
             options="inspect --watch --interactive --client --ip --mac --policy --block --unblock --undo --dry-run --all --offline --json $global_options"
             ;;
         interfaces)
-            options="--watch --interactive --dry-run --all --json $global_options"
+            options="inspect --rates --sample --watch --interactive --dry-run --all --json $global_options"
             ;;
         traffic)
             options="--watch --top --period --json $global_options"
             ;;
         wifi)
-            options="monitor --watch --all --json $global_options"
+            options="monitor clients scan --watch --all --json $global_options"
             ;;
-        clients) options="inspect --watch --all --offline --json $global_options" ;;
-        system) options="--watch --json $global_options" ;;
+        clients) options="inspect rename --watch --all --offline --json $global_options" ;;
+        system) options="reboot changes save --watch --json $global_options" ;;
+        system_action) options="--dry-run $global_options" ;;
+        wan|dhcp|routes|mesh|forwards|interface_inspect|wifi_clients) options="--watch --json $global_options" ;;
+        wifi_scan) options="--radio --all --json $global_options" ;;
+        clients_rename) options="--dry-run $global_options" ;;
+        connections) options="--client --watch --json $global_options" ;;
+        speedtest) options="--server --port --duration --reverse --interface --json --dry-run $global_options" ;;
         vpn) options="peers --watch --json $global_options" ;;
         diagnose) options="--interface --json $global_options" ;;
         logs) options="--limit --filter --watch --json $global_options" ;;
