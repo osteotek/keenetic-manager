@@ -636,7 +636,7 @@ def base_env(config=None, history=None):
     return env
 
 
-def run(config, *args, input_text=None, extra_env=None, timeout=12, subcommand="policy"):
+def run(config, *args, input_text=None, extra_env=None, timeout=12, subcommand="clients"):
     env = base_env(config)
     if extra_env:
         env.update(extra_env)
@@ -667,7 +667,7 @@ def read_pty(master, marker=None, timeout=5):
     return output.decode(errors="replace")
 
 
-def start_pty(config, *args, columns=80, extra_env=None, subcommand="policy"):
+def start_pty(config, *args, columns=80, extra_env=None, subcommand="clients"):
     master, slave = pty.openpty()
     fcntl.ioctl(slave, *termios_size(24, columns))
     env = base_env(config)
@@ -751,23 +751,31 @@ def main():
             index = 1
 
             result = subprocess.run([str(SCRIPT), "--version"], cwd=ROOT, text=True, capture_output=True)
-            check(result.returncode == 0 and result.stdout.strip().endswith("1.3.1"), "version output")
+            check(result.returncode == 0 and result.stdout.strip().endswith("1.4.0"), "version output")
             report(index, "version output"); index += 1
 
             root_env = base_env(temp / "missing-config")
             for args, status, expected in (
                 ([], 1, "--init"),
-                (["--help"], 0, "Status and monitoring:"),
-                (["--help"], 0, "Clients and policies:"),
+                (["--help"], 0, "Commands (the first verb is the default):"),
+                (["--help"], 0, "client    list|show|rename|wake|block|unblock|assign|nat"),
+                (["client", "show", "--help"], 0, "client show NAME|IP|MAC"),
+                (["config", "--help"], 0, "config init"),
+                (["config"], 2, "use config init or config discover"),
+                (["client", "frob"], 2, "unknown client verb"),
+                (["interface", "up"], 2, "use interface up ID"),
+                (["policy", "--all"], 2, "policy list shows policies"),
                 (["clinets"], 2, "Did you mean 'keenetic clients'"),
                 (["policy", "--help"], 0, "keenetic policy --interactive"),
-                (["interfaces", "--help"], 0, "keenetic interfaces --interactive"),
+                (["interfaces", "--help"], 0, "keenetic interface --interactive"),
                 (["traffic", "--help"], 0, "keenetic traffic [--top N]"),
-                (["wifi", "--help"], 0, "keenetic wifi [--all] [--json]"),
-                (["wifi", "--interactive"], 2, "unknown option for wifi"),
+                (["wifi", "--help"], 0, "keenetic wifi [list] [--all] [--json]"),
+                (["wifi", "--interactive"], 2, "picks a radio for wifi scan"),
+                (["wan", "--interactive"], 2, "not valid for wan"),
+                (["system", "--yes"], 2, "only valid for system reboot"),
                 (["wifi", "--offline"], 2, "unknown option for wifi"),
                 (["wifi", "--top", "3"], 2, "unknown option for wifi"),
-                (["wifi", "Guest"], 2, "unknown option for wifi"),
+                (["wifi", "Guest"], 2, "unknown wifi verb"),
                 (["traffic", "--top", "0"], 2, "--top requires a positive integer"),
                 (["traffic", "--top=-1"], 2, "--top requires a positive integer"),
                 (["traffic", "--top=1.5"], 2, "--top requires a positive integer"),
@@ -786,12 +794,12 @@ def main():
                 (["traffic", "Laptop"], 2, "unknown option for traffic"),
                 (["interfaces", "--offline"], 2, "unknown option for interfaces"),
                 (["interfaces", "--client", "Laptop"], 2, "unknown option for interfaces"),
-                (["interfaces", "Wireguard0"], 2, "use interfaces inspect ID"),
+                (["interfaces", "Wireguard0"], 2, "unknown interface verb"),
                 (["interfaces", "--json", "--interactive"], 2, "non-interactive listings"),
                 (["interfaces", "--dry-run"], 2, "--dry-run requires"),
                 (["--json"], 1, "--init"),
                 (["unknown"], 2, "unknown command"),
-                (["--init", "--help"], 0, "keenetic --init"),
+                (["--init", "--help"], 0, "keenetic config init"),
                 (["policy", "--init"], 2, "outside the policy subcommand"),
                 (["policy", "--discover"], 2, "outside the policy subcommand"),
                 (["--init", "--discover"], 2, "must be used alone"),
@@ -805,8 +813,8 @@ def main():
                 (["--help", "policy"], 0, "keenetic policy --interactive"),
                 (["--verbose", "wake", "--help"], 0, "wake SELECTOR"),
                 (["--help", "wake"], 0, "wake SELECTOR"),
-                (["--version", "policy"], 0, "keenetic 1.3.1"),
-                (["wake", "--version"], 0, "keenetic 1.3.1"),
+                (["--version", "policy"], 0, "keenetic 1.4.0"),
+                (["wake", "--version"], 0, "keenetic 1.4.0"),
                 (["wake"], 2, "requires at least one"),
                 (["wake", "--json"], 2, "unknown option for wake"),
                 (["wake", "--policy", "VPN"], 2, "unknown option for wake"),
@@ -1401,7 +1409,7 @@ def main():
             report(index, "command and file password retrieval"); index += 1
 
             posts = len(STATE.host_posts)
-            result = run(config, "--client", "Laptop", "--policy", "VPN", "--dry-run")
+            result = run(config, "--client", "Laptop", "--policy", "VPN", "--dry-run", subcommand="policy")
             check(result.returncode == 0 and "Plan" in result.stdout and "Would set" in result.stdout, result.stderr)
             check(len(STATE.host_posts) == posts, "dry run posted a mutation")
             verbose = run(config, "--json", "--verbose")
@@ -1412,7 +1420,7 @@ def main():
             STATE.assignments["02:00:00:00:00:10"] = {"policy": False, "deny": False}
             STATE.delay_next_update_reads = 2
             before_gets = STATE.assignment_gets
-            result = run(config, "--client", "Laptop", "--policy", "VPN")
+            result = run(config, "--client", "Laptop", "--policy", "VPN", subcommand="policy")
             check(result.returncode == 0 and "Applied and verified" in result.stdout, result.stderr)
             check(STATE.assignment_gets - before_gets >= 4, "verification did not retry")
             report(index, "bounded eventual-consistency verification retries"); index += 1
@@ -1420,9 +1428,9 @@ def main():
             STATE.assignments["02:00:00:00:00:10"] = {"policy": False, "deny": False}
             STATE.assignments["02:00:00:00:00:20"] = {"policy": False, "deny": False}
             posts = len(STATE.host_posts)
-            missing = run(config, "--client", "Laptop", "--client", "Missing", "--policy", "VPN")
+            missing = run(config, "--client", "Laptop", "--client", "Missing", "--policy", "VPN", subcommand="policy")
             check(missing.returncode == 3 and len(STATE.host_posts) == posts, "batch preflight mutated before failure")
-            batch = run(config, "--client", "Laptop", "--ip", "192.0.2.20", "--policy", "VPN")
+            batch = run(config, "--client", "Laptop", "--ip", "192.0.2.20", "--policy", "VPN", subcommand="policy")
             check(batch.returncode == 0 and "Plan (2 clients)" in batch.stdout, batch.stderr)
             check(STATE.assignments["02:00:00:00:00:10"]["policy"] == "Policy1", "batch first client")
             check(STATE.assignments["02:00:00:00:00:20"]["policy"] == "Policy1", "batch second client")
@@ -1431,15 +1439,15 @@ def main():
             STATE.assignments["02:00:00:00:00:10"] = {"policy": False, "deny": False}
             STATE.assignments["02:00:00:00:00:20"] = {"policy": False, "deny": False}
             STATE.fail_mac_once = "02:00:00:00:00:20"
-            partial = run(config, "--client", "Laptop", "--ip", "192.0.2.20", "--policy", "VPN")
+            partial = run(config, "--client", "Laptop", "--ip", "192.0.2.20", "--policy", "VPN", subcommand="policy")
             check(partial.returncode == 1 and "1 already completed" in partial.stderr, "partial failure context")
             check(STATE.assignments["02:00:00:00:00:10"]["policy"] == "Policy1", "partial first mutation")
             check(STATE.assignments["02:00:00:00:00:20"]["policy"] is False, "partial failed mutation")
             report(index, "precise non-atomic batch failure reporting"); index += 1
 
-            blocked = run(config, "--client", "Laptop", "--block")
+            blocked = run(config, "--client", "Laptop", "--block", subcommand="policy")
             check(blocked.returncode == 0 and STATE.assignments["02:00:00:00:00:10"]["deny"], blocked.stderr)
-            unblocked = run(config, "--client", "Laptop", "--unblock")
+            unblocked = run(config, "--client", "Laptop", "--unblock", subcommand="policy")
             check(unblocked.returncode == 0 and not STATE.assignments["02:00:00:00:00:10"]["deny"], unblocked.stderr)
             wake = run(config, "--client", "设备客户端", subcommand="wake")
             check(wake.returncode == 0 and "magic packet queued" in wake.stdout, wake.stderr)
@@ -1464,8 +1472,8 @@ def main():
             report(index, "wake subcommand batch preflight, deduplication, and dry-run"); index += 1
 
             for args in (
-                ("--verbose", "--no-color", "policy", "--json"),
-                ("policy", "--json", "--verbose", "--no-color"),
+                ("--verbose", "--no-color", "clients", "--json"),
+                ("clients", "--json", "--verbose", "--no-color"),
             ):
                 listed = run(config, *args, subcommand=None)
                 check(listed.returncode == 0 and len(json.loads(listed.stdout)) == 4, listed.stderr)
@@ -1497,12 +1505,12 @@ def main():
                 for number in range(20)
             ]))
             STATE.assignments["02:00:00:00:00:10"] = {"policy": False, "deny": False}
-            changed = run(config, "--client", "Laptop", "--policy", "Direct", extra_env={"KEENETIC_STATE_FILE": str(history)})
+            changed = run(config, "--client", "Laptop", "--policy", "Direct", extra_env={"KEENETIC_STATE_FILE": str(history)}, subcommand="policy")
             check(changed.returncode == 0 and history.exists(), changed.stderr)
             entries = json.loads(history.read_text())
             check(len(entries) == 20 and entries[0]["name"] == "old-1", "rollback history bound")
             check(entries[-1]["before"] == {"policy": False, "deny": False}, "rollback before state")
-            undone = run(config, "--undo", extra_env={"KEENETIC_STATE_FILE": str(history)})
+            undone = run(config, "--undo", extra_env={"KEENETIC_STATE_FILE": str(history)}, subcommand="policy")
             check(undone.returncode == 0 and STATE.assignments["02:00:00:00:00:10"]["policy"] is False, undone.stderr)
             remaining = json.loads(history.read_text())
             check(len(remaining) == 19 and all(entry["router"] == "http://other-router" for entry in remaining),
@@ -1510,11 +1518,11 @@ def main():
             report(index, "bounded local rollback history and undo"); index += 1
 
             check(run(config, "--bad-option").returncode == 2, "usage exit code")
-            check(run(config, "--client", "Missing", "--policy", "VPN").returncode == 3, "client exit code")
-            check(run(config, "--client", "Laptop", "--policy", "Missing").returncode == 4, "policy exit code")
+            check(run(config, "--client", "Missing", "--policy", "VPN", subcommand="policy").returncode == 3, "client exit code")
+            check(run(config, "--client", "Laptop", "--policy", "Missing", subcommand="policy").returncode == 4, "policy exit code")
             STATE.assignments["02:00:00:00:00:20"] = {"policy": "Policy1", "deny": False}
             STATE.drop_next_update = True
-            failed_verify = run(config, "--ip", "192.0.2.20", "--policy", "Direct")
+            failed_verify = run(config, "--ip", "192.0.2.20", "--policy", "Direct", subcommand="policy")
             check(failed_verify.returncode == 5 and "4 checks over 1 second" in failed_verify.stderr, "verification exit code")
             report(index, "stable documented exit codes"); index += 1
 
@@ -1532,7 +1540,7 @@ def main():
             )
             fake_fzf.chmod(0o700)
             process, master = start_pty(
-                config, "--interactive",
+                config, "--interactive", subcommand="policy",
                 extra_env={
                     "KEENETIC_FZF": str(fake_fzf),
                     "FZF_COUNT_FILE": str(fzf_count),
@@ -1555,7 +1563,7 @@ def main():
             report(index, "fzf interactive search with aligned columns"); index += 1
 
             native_env = {"KEENETIC_FZF": "keenetic-fzf-not-installed"}
-            process, master = start_pty(config, "--all", "--interactive", columns=40, extra_env=native_env)
+            process, master = start_pty(config, "--all", "--interactive", columns=40, extra_env=native_env, subcommand="policy")
             first = read_pty(master, "Esc/q to cancel") + read_pty(master, timeout=0.4)
             clean_lines = [ANSI.sub("", line).replace("\r", "") for line in first.splitlines()]
             option_lines = [line for line in clean_lines if line.startswith(("> ", "  "))]
@@ -1571,7 +1579,7 @@ def main():
             check(process.returncode == 0, "native resize and Escape cancellation")
             report(index, "Unicode-safe native TUI resizing"); index += 1
 
-            process, master = start_pty(config, "Phone", columns=80, extra_env=native_env)
+            process, master = start_pty(config, "Phone", columns=80, extra_env=native_env, subcommand="policy")
             read_pty(master, "Esc/q to cancel")
             os.write(master, b"\x1b[B\r")
             read_pty(master, "Current policy:")
@@ -1601,8 +1609,8 @@ def main():
             profile_env = base_env()
             profile_env.update({"XDG_CONFIG_HOME": str(config_home), "KEENETIC_STATE_FILE": str(temp / "profile-history")})
             for args in (
-                ("--router", "home", "policy", "--json"),
-                ("policy", "--router=home", "--json"),
+                ("--router", "home", "clients", "--json"),
+                ("clients", "--router=home", "--json"),
                 ("--router=home", "wake", "--client", "Laptop", "--dry-run"),
                 ("wake", "--router", "home", "--client", "Laptop", "--dry-run"),
             ):
@@ -1620,7 +1628,7 @@ def main():
                   profiled_status.stderr)
             command_named_profile.write_text(config.read_text())
             command_named_profile.chmod(0o600)
-            profiled = subprocess.run([str(SCRIPT), "--router", "policy", "policy", "--json"],
+            profiled = subprocess.run([str(SCRIPT), "--router", "policy", "clients", "--json"],
                                       cwd=ROOT, env=profile_env, text=True, capture_output=True, timeout=12)
             check(profiled.returncode == 0 and len(json.loads(profiled.stdout)) == 4, profiled.stderr)
 
@@ -1656,7 +1664,7 @@ def main():
             trusted_status = run(tls_config, "--ca-file", str(ca_cert), "--json", subcommand=None)
             check(trusted_status.returncode == 0 and json.loads(trusted_status.stdout)["router"] == tls_url,
                   trusted_status.stderr)
-            trusted_prefix = run(tls_config, "--ca-file", str(ca_cert), "policy", "--json", subcommand=None)
+            trusted_prefix = run(tls_config, "--ca-file", str(ca_cert), "clients", "--json", subcommand=None)
             check(trusted_prefix.returncode == 0 and len(json.loads(trusted_prefix.stdout)) == 4,
                   trusted_prefix.stderr)
             secure_wake = run(tls_config, "--ca-file", str(ca_cert), "wake", "--client", "Laptop",
@@ -1667,7 +1675,7 @@ def main():
                   f"untrusted TLS result: rc={untrusted.returncode}, stderr={untrusted.stderr!r}")
             insecure = run(tls_config, "--insecure", "--json")
             check(insecure.returncode == 0 and "certificate verification is disabled" in insecure.stderr, insecure.stderr)
-            insecure_prefix = run(tls_config, "--insecure", "policy", "--json", subcommand=None)
+            insecure_prefix = run(tls_config, "--insecure", "clients", "--json", subcommand=None)
             check(insecure_prefix.returncode == 0 and "certificate verification is disabled" in insecure_prefix.stderr,
                   insecure_prefix.stderr)
             check(run(tls_config, "--ca-file", str(ca_cert), "--insecure").returncode == 2, "TLS conflict")
@@ -1990,13 +1998,13 @@ def main():
 
             STATE.policies["Policy1"]["permit"] = [{"interface": "Wireguard0", "enabled": True},
                                                       {"interface": "OpenVPN0", "no": True}]
-            policy = run(config, "inspect", "VPN", "--json")
+            policy = run(config, "inspect", "VPN", "--json", subcommand="policy")
             check(policy.returncode == 0, policy.stderr)
             detail = json.loads(policy.stdout)
             check(detail["interfaces"][0]["id"] == "Wireguard0" and not detail["interfaces"][1]["enabled"],
                   "policy permit order")
-            check(run(config, "inspect", "absent", "--json").returncode == 4, "unknown policy")
-            check(run(config, "inspect", "default", "--json").returncode == 0, "default policy inspect")
+            check(run(config, "inspect", "absent", "--json", subcommand="policy").returncode == 4, "unknown policy")
+            check(run(config, "inspect", "default", "--json", subcommand="policy").returncode == 0, "default policy inspect")
             report(index, "policy inspection and permit order"); index += 1
 
             logs = run(config, "--limit", "50", "--filter", "WIREGUARD", "--json", subcommand="logs")
@@ -2067,7 +2075,7 @@ def main():
                 ("keenetic wan --js", 2, "--json"),
                 ("keenetic connections --cli", 2, "--client"),
                 ("keenetic speedtest --ser", 2, "--server"),
-                ("keenetic interfaces --rat", 2, "--rates"),
+                ("keenetic interface ra", 2, "rates"),
                 ("keenetic interfaces inspect Bridge0 --js", 4, "--json"),
                 ("keenetic wifi cl", 2, "clients"),
                 ("keenetic wifi scan --rad", 3, "--radio"),
@@ -2082,19 +2090,25 @@ def main():
                 ("keenetic system reboot --js", 3, None),
                 ("keenetic --router reboot system re", 4, "reboot"),
                 ("keenetic system --router reboot --wa", 4, "--watch"),
-                ("keenetic clients ins", 2, "inspect"),
-                ("keenetic policy ins", 2, "inspect"),
-                ("keenetic wifi mon", 2, "monitor"),
+                ("keenetic client sh", 2, "show"),
+                ("keenetic policy sh", 2, "show"),
+                ("keenetic wifi lo", 2, "load"),
                 ("keenetic vpn pe", 2, "peers"),
                 ("keenetic logs --li", 2, "--limit"),
                 ("keenetic diagnose --int", 2, "--interface"),
                 ("keenetic system --watch 2", 3, None),
                 ("keenetic pol", 1, "policy"),
-                ("keenetic wa", 1, "wake"),
+                ("keenetic client wa", 2, "wake"),
+                ("keenetic client wake --dry", 3, "--dry-run"),
+                ("keenetic sta", 1, "status"),
+                ("keenetic na", 1, "nat"),
+                ("keenetic config in", 2, "init"),
+                ("keenetic policy un", 2, "undo"),
+                ("keenetic interface up Proxy0 --dry", 4, "--dry-run"),
                 ("keenetic --router home pol", 3, "policy"),
                 ("keenetic --router wake pol", 3, "policy"),
                 ("keenetic --router home policy --cli", 4, "--client"),
-                ("keenetic int", 1, "interfaces"),
+                ("keenetic int", 1, "interface"),
                 ("keenetic tra", 1, "traffic"),
                 ("keenetic wi", 1, "wifi"),
                 ("keenetic wifi --al", 2, "--all"),
@@ -2149,11 +2163,11 @@ def main():
                     check(expected in completion.stdout.splitlines(), f"missing completion for {words}")
             report(index, "static Bash completion"); index += 1
 
-            verb = run(config, "set", "192.0.2.10", "VPN", "--dry-run")
+            verb = run(config, "set", "192.0.2.10", "VPN", "--dry-run", subcommand="policy")
             check(verb.returncode == 0 and ("Would set Laptop" in verb.stdout or "already uses" in verb.stdout), verb.stderr)
-            verb = run(config, "block", "Laptop", "02:00:00:00:00:20", "--dry-run")
+            verb = run(config, "block", "Laptop", "02:00:00:00:00:20", "--dry-run", subcommand="policy")
             check(verb.returncode == 0 and "Plan (2 clients)" in verb.stdout, verb.stdout + verb.stderr)
-            ambiguous = run(config, "set", "Phone", "VPN")
+            ambiguous = run(config, "set", "Phone", "VPN", subcommand="policy")
             check(ambiguous.returncode == 3 and "keenetic policy --ip 192.0.2.20 --policy VPN" in ambiguous.stderr, ambiguous.stderr)
             ambiguous = run(config, "inspect", "Phone", subcommand="clients")
             check(ambiguous.returncode == 3 and "keenetic clients inspect 192.0.2.21" in ambiguous.stderr, ambiguous.stderr)
@@ -2169,6 +2183,113 @@ def main():
             plain = run(config, subcommand="traffic")
             check(plain.returncode == 0 and not any(line.endswith(" ") for line in plain.stdout.splitlines()), "trailing spaces in table")
             report(index, "verb aliases, ambiguity hints, typo suggestions, folded unknown fields, and colors"); index += 1
+
+            process, master = start_pty(config, "--interactive", subcommand="clients",
+                                        extra_env={"KEENETIC_FZF": "keenetic-fzf-not-installed"})
+            read_pty(master, "Esc/q to cancel")
+            os.write(master, b"\x1b[B\r")  # Laptop follows the current device.
+            output = finish_pty(process, master)
+            check(process.returncode == 0 and "Client details" in output and "02:00:00:00:00:10" in output, output)
+            process, master = start_pty(config, "-i", "--all", subcommand="clients",
+                                        extra_env={"KEENETIC_FZF": "keenetic-fzf-not-installed"})
+            read_pty(master, "Esc/q to cancel")
+            os.write(master, b"q")
+            output = finish_pty(process, master)
+            check(process.returncode == 0 and "No client selected." in output and "Client details" not in output, output)
+            for args in (("--interactive", "--json"), ("--interactive", "inspect", "Laptop"), ("--interactive", "--watch", "1")):
+                check(run(config, *args, subcommand="clients").returncode == 2, f"clients {args} accepted")
+            check(run(config, "--interactive", subcommand="system").returncode == 2, "system accepted --interactive")
+            report(index, "interactive client inspection"); index += 1
+
+            fzf_off = {"KEENETIC_FZF": "keenetic-fzf-not-installed"}
+
+            def drive(args, keys, subcommand="policy", markers=("Esc/q to cancel",)):
+                process, master = start_pty(config, *args, subcommand=subcommand, extra_env=fzf_off)
+                for marker, key in zip(markers, keys):
+                    read_pty(master, marker)
+                    os.write(master, key)
+                output = finish_pty(process, master)
+                return process.returncode, output
+
+            code, output = drive(["--interactive", "--dry-run"], [b" \x1b[B \r"], subcommand="wake")
+            check(code == 0 and "Plan (2 clients)" in output and "Would wake" in output, output)
+            code, output = drive(["--interactive", "--dry-run"], [b" \x1b[B \r", b"\r"],
+                                 markers=("Esc/q to cancel", "Clients: 2 selected"))
+            check(code == 0 and "Plan (2 clients)" in output and 'policy "Default"' in output, output)
+            changed = run(config, "set", "Laptop", "VPN", subcommand="policy")
+            if "already uses" in changed.stdout:
+                changed = run(config, "set", "Laptop", "Default", subcommand="policy")
+            check(changed.returncode == 0, changed.stderr)
+            code, output = drive(["--undo", "--interactive", "--dry-run"], [b"\r"])
+            check(code == 0 and "Would restore Laptop" in output, output)
+            check(run(config, "--undo", subcommand="policy").returncode == 0, "undo after interactive preview")
+            code, output = drive(["--interactive"], [b"\r", b"\x1b[B\x1b[B\r"], subcommand="interfaces",
+                                 markers=("Esc/q to cancel", "Interface: "))
+            check(code == 0 and "Interface details" in output, output)
+            code, output = drive(["inspect", "--interactive"], [b"\r"], subcommand="interfaces")
+            check(code == 0 and "Interface details" in output, output)
+            code, output = drive(["--interactive"], [b"\r"], subcommand="connections")
+            check(code == 0 and "Active NAT connections" in output, output)
+            code, output = drive(["rename", "--interactive", "--dry-run"], [b"\x1b[B\r", b"Renamed\r"],
+                                 subcommand="clients", markers=("Esc/q to cancel", "New name"))
+            check(code == 0 and "Would rename client 02:00:00:00:00:10 to Renamed" in output, output)
+            code, output = drive(["inspect", "--interactive"], [b"\r"])
+            check(code == 0 and "Policy details" in output, output)
+            code, output = drive(["--interactive"], [b"\x1b[B\r"], subcommand="logs")
+            check(code == 0 and "Router logs" in output, output)
+            code, output = drive(["scan", "--interactive"], [b"\r"], subcommand="wifi")
+            check(code == 0 and "Nearby Wi-Fi networks" in output, output)
+            code, output = drive(["--interactive", "--dry-run"], [b"\r", b"\r"], subcommand="speedtest",
+                                 markers=("Esc/q to cancel", "Source interface"))
+            check(code == 0 and "Would run router-side iPerf3" in output, output)
+            code, output = drive(["example.com", "--interactive"], [b"\r"], subcommand="diagnose")
+            check(code == 0 and "Connection diagnostics" in output, output)
+            code, output = drive([], [b"\r"], subcommand="--interactive")  # top-level command menu
+            check(code == 0 and "ROUTER INFO" in output, output)
+            process, master = start_pty(config, "reboot", subcommand="system")
+            read_pty(master, "[y/N]")
+            os.write(master, b"n\r")
+            output = finish_pty(process, master)
+            check(process.returncode == 0 and "No changes made." in output, output)
+            check(run(config, "reboot", "--yes", "--dry-run", subcommand="system").returncode == 0, "--yes rejected")
+            check(run(config, "--interactive", "--client", "Laptop", subcommand="connections").returncode == 2,
+                  "connections --interactive accepted --client")
+            check(run(config, "--undo", "--interactive", "--json", subcommand="policy").returncode == 2, "undo --interactive accepted --json")
+            report(index, "interactive pickers for wake, batch policy, undo, interfaces, connections, rename, inspect, logs, scan, speedtest, diagnose, menu, and reboot confirmation"); index += 1
+
+            policies = run(config, subcommand="policy")
+            check(policies.returncode == 0 and "Connection policies" in policies.stdout and "Policy0" in policies.stdout
+                  and "Laptop" not in policies.stdout, "bare policy should list policies: " + policies.stdout)
+            listed = json.loads(run(config, "--json", subcommand="policy").stdout)["policies"]
+            check([entry["name"] for entry in listed] == ["Default", "Direct", "VPN", "Blocked"]
+                  and next(e for e in listed if e["id"] == "Policy1")["clients"] == 2, "policy list JSON")
+            check("Policy details" in run(config, "show", "VPN", subcommand="policy").stdout, "policy show")
+            check("Client details" in run(config, "show", "Laptop", subcommand="client").stdout, "client show")
+            check("* Workstation" in run(config, "list", subcommand="client").stdout, "client list")
+            check("Would wake Laptop" in run(config, "wake", "Laptop", "--dry-run", subcommand="client").stdout, "client wake")
+            check('policy "VPN"' in run(config, "assign", "192.0.2.10", "VPN", "--dry-run", subcommand="client").stdout, "client assign")
+            check("Would block" in run(config, "block", "Laptop", "--dry-run", subcommand="client").stdout, "client block")
+            nat = run(config, "nat", "Laptop", subcommand="client")
+            check(nat.returncode == 0 and "192.0.2.10:54321" in nat.stdout and "192.0.2.20" not in nat.stdout, "client nat")
+            check("Active NAT connections" in run(config, subcommand="nat").stdout, "nat alias")
+            check("Interface details" in run(config, "show", "Bridge0", subcommand="interface").stdout, "interface show")
+            check("Would set interface Proxy0 administratively down" in run(config, "down", "Proxy0", "--dry-run", subcommand="interface").stdout,
+                  "interface down dry run")
+            saved_interfaces = json.loads(json.dumps(STATE.interfaces))
+            raised = run(config, "up", "Proxy0", subcommand="interface")
+            check(raised.returncode == 0 and STATE.interfaces["Proxy0"]["state"] == "up", raised.stdout + raised.stderr)
+            lowered = run(config, "down", "Proxy0", subcommand="interface")
+            check(lowered.returncode == 0 and STATE.interfaces["Proxy0"]["state"] == "down", lowered.stdout + lowered.stderr)
+            STATE.interfaces = saved_interfaces
+            check(run(config, "up", "Nope", subcommand="interface").returncode == 2, "unknown interface for up")
+            check("channel utilization" in run(config, "load", subcommand="wifi").stdout, "wifi load")
+            check("ROUTER INFO" in run(config, subcommand="status").stdout, "status verb")
+            check("Router health" in run(config, "show", subcommand="system").stdout, "system show")
+            check(json.loads(run(config, "list", "--json", subcommand="interface").stdout)["interfaces"], "interface list --json")
+            check(run(config, "undo", "--dry-run", subcommand="policy").returncode in (0, 1), "policy undo verb")
+            check("Client details" in run(config, "inspect", "Laptop", subcommand="clients").stdout, "old clients inspect still works")
+            check('policy "VPN"' in run(config, "set", "Laptop", "VPN", "--dry-run", subcommand="policy").stdout, "old policy set still works")
+            report(index, "verb grammar: client, policy, interface, wifi, nat, status, and compatibility spellings"); index += 1
 
         print(f"1..{index - 1}")
     finally:

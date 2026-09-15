@@ -28,11 +28,31 @@ _keenetic() {
                 [[ $scope != system ]] || scope=system_action
                 ;;
             scan) [[ $scope != wifi ]] || scope=wifi_scan ;;
-            inspect) [[ $scope != interfaces ]] || scope=interface_inspect ;;
+            load|monitor) [[ $scope != wifi ]] || scope=wifi_monitor ;;
+            inspect|show)
+                case $scope in interfaces|clients|policy) scope=interface_inspect ;; system) scope=view ;; esac ;;
             rename) [[ $scope != clients ]] || scope=clients_rename ;;
-            clients)
+            list)
+                case $scope in policy) scope=view ;; esac ;;
+            rates) [[ $scope != interfaces ]] || scope=interface_rates ;;
+            up|down) [[ $scope != interfaces ]] || scope=action ;;
+            assign|set|block|unblock)
+                case $scope in clients|policy) scope=action ;; esac ;;
+            undo) [[ $scope != policy ]] || scope=policy_undo ;;
+            wake)
+                if [[ $scope == root || $scope == clients ]]; then scope=wake; fi ;;
+            nat|connections)
+                if [[ $scope == root || $scope == clients ]]; then scope=connections; fi ;;
+            init) [[ $scope != config ]] || scope=config_init ;;
+            discover) [[ $scope != config ]] || return 0 ;;
+            client|clients)
                 if [[ $scope == root ]]; then scope=clients; elif [[ $scope == wifi ]]; then scope=wifi_clients; fi ;;
-            policy|wake|interfaces|traffic|wifi|system|vpn|diagnose|logs|wan|dhcp|routes|mesh|speedtest|connections|forwards)
+            interface|interfaces) [[ $scope != root ]] || scope=interfaces ;;
+            policies) [[ $scope != root ]] || scope=policy ;;
+            log) [[ $scope != root ]] || scope=logs ;;
+            status) [[ $scope != root ]] || scope=view ;;
+            config) [[ $scope != root ]] || scope=config ;;
+            policy|traffic|wifi|system|vpn|diagnose|logs|wan|dhcp|routes|mesh|speedtest|forwards)
                 [[ $scope != root ]] || scope=$word
                 ;;
             -*) ;;
@@ -43,33 +63,40 @@ _keenetic() {
     case $scope in
         root)
             options="--init --discover $global_options"
-            $setup || options="policy wake interfaces traffic wifi clients system vpn diagnose logs wan dhcp routes mesh speedtest connections forwards --watch --all --json $options"
+            $setup || options="status client policy interface wifi vpn traffic wan dhcp routes mesh nat forwards system logs diagnose speedtest config --interactive --watch --all --json $options"
             ;;
         policy)
-            options="inspect set block unblock --watch --interactive --client --ip --mac --policy --block --unblock --undo --dry-run --all --offline --json $global_options"
+            options="list show assign block unblock undo --watch --interactive --client --ip --mac --policy --block --unblock --undo --dry-run --all --offline --json $global_options"
             ;;
+        policy_undo) options="--interactive --dry-run $global_options" ;;
         interfaces)
-            options="inspect --rates --sample --watch --interactive --dry-run --all --json $global_options"
+            options="list show rates up down --sample --watch --interactive --dry-run --all --json $global_options"
             ;;
+        interface_rates) options="--sample --watch --all --json $global_options" ;;
+        action) options="--interactive --dry-run $global_options" ;;
+        view) options="--watch --json $global_options" ;;
+        config) options="init discover $global_options" ;;
+        config_init) options="--router --ca-file --insecure $global_options" ;;
         traffic)
             options="--watch --top --period --json $global_options"
             ;;
         wifi)
-            options="monitor clients scan --watch --all --json $global_options"
+            options="list clients scan load --watch --all --json $global_options"
             ;;
-        clients) options="inspect rename --watch --all --offline --json $global_options" ;;
-        system) options="reboot changes save --watch --json $global_options" ;;
-        system_action) options="--dry-run $global_options" ;;
+        wifi_monitor) options="--watch --all --json $global_options" ;;
+        clients) options="list show rename wake block unblock assign nat --interactive --watch --all --offline --json $global_options" ;;
+        system) options="show reboot changes save --watch --json $global_options" ;;
+        system_action) options="--dry-run --yes $global_options" ;;
         wan|dhcp|routes|mesh|forwards|interface_inspect|wifi_clients) options="--watch --json $global_options" ;;
-        wifi_scan) options="--radio --all --json $global_options" ;;
+        wifi_scan) options="--radio --interactive --all --json $global_options" ;;
         clients_rename) options="--dry-run $global_options" ;;
-        connections) options="--client --watch --json $global_options" ;;
-        speedtest) options="--server --port --duration --reverse --interface --json --dry-run $global_options" ;;
+        connections) options="--client --interactive --watch --json $global_options" ;;
+        speedtest) options="--server --port --duration --reverse --interface --interactive --json --dry-run $global_options" ;;
         vpn) options="peers --watch --json $global_options" ;;
-        diagnose) options="--interface --json $global_options" ;;
-        logs) options="--limit --filter --watch --json $global_options" ;;
+        diagnose) options="--interface --interactive --json $global_options" ;;
+        logs) options="--limit --filter --interactive --watch --json $global_options" ;;
         wake)
-            options="--client --ip --mac --dry-run $global_options"
+            options="--client --ip --mac --interactive --dry-run $global_options"
             ;;
     esac
     if [[ $scope == traffic && $current == --period=* ]]; then

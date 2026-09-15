@@ -21,23 +21,24 @@ _keenetic_watch_json=(
 
 _keenetic_commands() {
   local -a commands=(
-    'interfaces:List interfaces; inspect, --rates, or --interactive control'
-    'wifi:Wi-Fi networks; wifi clients, wifi scan, wifi monitor'
-    'traffic:Rank clients by recent traffic'
+    'status:Router summary'
+    'client:Devices: list, show, rename, wake, block, unblock, assign, nat'
+    'policy:Connection policies: list, show, assign, block, unblock, undo'
+    'interface:Interfaces: list, show, rates, up, down'
+    'wifi:Wi-Fi: list, clients, scan, load'
+    'vpn:WireGuard peers'
+    'traffic:Top clients by recent traffic'
     'wan:Internet health, global connections, and DNS servers'
     'dhcp:DHCP leases and static reservations'
     'routes:IPv4 and IPv6 routes'
     'mesh:Mesh nodes and backhaul links'
-    'connections:Active NAT connections'
+    'nat:Active NAT connections'
     'forwards:Configured port-forwarding rules'
-    'vpn:WireGuard peers'
-    'system:Health; changes, save, reboot'
+    'system:Health: show, changes, save, reboot'
     'logs:Recent router logs'
     'diagnose:Router-side ping/traceroute'
     'speedtest:Router-side iPerf3 test'
-    'clients:List, inspect, or rename clients'
-    'policy:Connection policies and Internet blocks'
-    'wake:Wake-on-LAN for known clients'
+    'config:init or discover'
   )
   _describe -t commands 'keenetic command' commands
 }
@@ -50,6 +51,7 @@ _keenetic() {
     "${_keenetic_global_options[@]}" \
     '--init[Configure and test router credentials]' \
     '--discover[Probe the default gateway for Keenetic API access]' \
+    '(-i --interactive)'{-i,--interactive}'[Pick a command from a menu]' \
     '--all[Include inactive interfaces]' \
     "${_keenetic_watch_json[@]}" \
     '1: :->command' \
@@ -59,7 +61,12 @@ _keenetic() {
     command) _keenetic_commands ;;
     args)
       case $line[1] in
-        policy)
+        config)
+          _arguments "${_keenetic_global_options[@]}" \
+            '1: :((init\:"Create and test the configuration" discover\:"Probe the default gateway"))' ;;
+        status)
+          _arguments "${_keenetic_global_options[@]}" "${_keenetic_watch_json[@]}" '--all[Include inactive interfaces]' ;;
+        policy|policies)
           _arguments "${_keenetic_global_options[@]}" "${_keenetic_watch_json[@]}" \
             '(-i --interactive)'{-i,--interactive}'[Select client and policy interactively]' \
             '*--client[Select by exact client name]:name' \
@@ -72,55 +79,62 @@ _keenetic() {
             '--dry-run[Preview without writing]' \
             '--all[Include offline clients]' \
             '--offline[Show only offline clients]' \
-            '1: :((inspect\:"Show policy interfaces and clients" set\:"Assign a policy to clients" block\:"Block Internet for clients" unblock\:"Unblock Internet for clients"))' \
+            '1: :((list\:"List policies" show\:"Show policy interfaces and clients" assign\:"Assign a policy to clients" block\:"Block Internet for clients" unblock\:"Unblock Internet for clients" undo\:"Restore a recorded change"))' \
             '*:: :_message "client name, IP, MAC, or policy"' ;;
         wake)
           _arguments "${_keenetic_global_options[@]}" \
             '*--client[Select by exact client name]:name' \
             '*--ip[Select by exact IP address]:address' \
             '*--mac[Select by exact MAC address]:mac' \
+            '(-i --interactive)'{-i,--interactive}'[Pick one or more clients]' \
             '--dry-run[Preview without sending Wake-on-LAN]' \
             '*:client name' ;;
-        interfaces)
+        interface|interfaces)
           _arguments "${_keenetic_global_options[@]}" "${_keenetic_watch_json[@]}" \
-            '(-i --interactive)'{-i,--interactive}'[Connect or disconnect an interface]' \
-            '--rates[Show sampled RX/TX rates]' \
+            '(-i --interactive)'{-i,--interactive}'[Pick an interface, then connect, disconnect, or inspect]' \
             '--sample[Initial rate sample interval]:seconds' \
             '--all[Include inactive interfaces]' \
-            '--dry-run[Preview the selected action]' \
-            '1: :((inspect\:"Show one interface in detail"))' \
+            '--dry-run[Preview up/down or the selected action]' \
+            '1: :((list\:"List interfaces" show\:"Show one interface in detail" rates\:"Sampled RX/TX rates" up\:"Enable an interface" down\:"Disable an interface"))' \
             '2:interface ID' ;;
         wifi)
           _arguments "${_keenetic_global_options[@]}" "${_keenetic_watch_json[@]}" \
             '--all[Include disabled networks or radios]' \
             '--radio[Survey one radio]:radio' \
-            '1: :((clients\:"Associated stations" scan\:"Survey nearby networks" monitor\:"Channel utilization"))' ;;
+            '(-i --interactive)'{-i,--interactive}'[Pick a radio to survey]' \
+            '1: :((list\:"Wi-Fi networks" clients\:"Associated stations" scan\:"Survey nearby networks" load\:"Channel utilization"))' ;;
         traffic)
           _arguments "${_keenetic_global_options[@]}" "${_keenetic_watch_json[@]}" \
             '--top[Number of clients]:count' \
             '--period[History window]:period:(3m 1h 3h 1d)' ;;
-        clients)
+        client|clients)
           _arguments "${_keenetic_global_options[@]}" "${_keenetic_watch_json[@]}" \
-            '--all[Include offline clients]' '--offline[Show only offline clients]' '--dry-run[Preview rename]' \
-            '1: :((inspect\:"Show one client in detail" rename\:"Rename a client"))' \
-            '2:client name, IP, or MAC' '3:new name' ;;
+            '--all[Include offline clients]' '--offline[Show only offline clients]' '--dry-run[Preview the action]' \
+            '(-i --interactive)'{-i,--interactive}'[Pick the client(s) instead of naming them]' \
+            '1: :((list\:"List clients" show\:"Show one client in detail" rename\:"Rename a client" wake\:"Wake-on-LAN" block\:"Block Internet" unblock\:"Unblock Internet" assign\:"Assign a policy" nat\:"Active NAT connections"))' \
+            '*:client name, IP, or MAC' ;;
         system)
           _arguments "${_keenetic_global_options[@]}" "${_keenetic_watch_json[@]}" '--dry-run[Preview save or reboot]' \
-            '1: :((changes\:"Pending configuration changes" save\:"Persist running configuration" reboot\:"Reboot the router"))' ;;
+            '(-y --yes)'{-y,--yes}'[Reboot without asking for confirmation]' \
+            '1: :((show\:"Router health" changes\:"Pending configuration changes" save\:"Persist running configuration" reboot\:"Reboot the router"))' ;;
         vpn)
           _arguments "${_keenetic_global_options[@]}" "${_keenetic_watch_json[@]}" '1: :((peers\:"WireGuard peers"))' ;;
         logs)
           _arguments "${_keenetic_global_options[@]}" "${_keenetic_watch_json[@]}" \
-            '--limit[Maximum entries]:count' '--filter[Literal text filter]:text' ;;
+            '--limit[Maximum entries]:count' '--filter[Literal text filter]:text' \
+            '(-i --interactive)'{-i,--interactive}'[Pick a log source]' ;;
         diagnose)
-          _arguments "${_keenetic_global_options[@]}" '--json[Emit JSON]' '--interface[Route through this interface]:interface' '1:host' ;;
+          _arguments "${_keenetic_global_options[@]}" '--json[Emit JSON]' '--interface[Route through this interface]:interface' \
+            '(-i --interactive)'{-i,--interactive}'[Pick the source interface]' '1:host' ;;
         speedtest)
           _arguments "${_keenetic_global_options[@]}" '--json[Emit JSON]' '--dry-run[Preview the request]' \
             '--server[iPerf3 server]:host' '--port[Server port]:port' '--duration[Seconds]:seconds' \
-            '--reverse[Measure download]' '--interface[Router interface]:interface' ;;
-        connections)
-          _arguments "${_keenetic_global_options[@]}" "${_keenetic_watch_json[@]}" '--client[Filter by client]:client' ;;
-        wan|dhcp|routes|mesh|forwards)
+            '--reverse[Measure download]' '--interface[Router interface]:interface' \
+            '(-i --interactive)'{-i,--interactive}'[Pick the server and source interface]' ;;
+        nat|connections)
+          _arguments "${_keenetic_global_options[@]}" "${_keenetic_watch_json[@]}" '--client[Filter by client]:client' \
+            '(-i --interactive)'{-i,--interactive}'[Pick the client]' ;;
+        wan|dhcp|routes|mesh|forwards|log)
           _arguments "${_keenetic_global_options[@]}" "${_keenetic_watch_json[@]}" ;;
       esac ;;
   esac

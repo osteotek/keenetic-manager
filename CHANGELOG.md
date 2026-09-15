@@ -1,7 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.4.0 - 2026-09-15
 
+- Reorganize commands around resources and verbs: `client list|show|rename|wake|block|unblock|assign|nat`, `policy list|show|assign|block|unblock|undo`, `interface list|show|rates|up|down`, `wifi list|clients|scan|load`, `system show|changes|save|reboot`, `nat`, `status`, and `config init|discover`. Earlier spellings keep working.
+- Bare `keenetic policy` now lists policies with IDs and client counts; use `client list` for clients.
+- Add non-interactive `interface up ID` and `interface down ID` with the same verification as the interactive path.
 - Color status words in tables and detail views: green for online/connected/pass, yellow for offline/disconnected/not ready, red for errors and blocks, dim for unknown values.
 - Fold fields the router did not report into one dim `Not reported:` line in detail views; JSON is unchanged.
 - Add `policy set CLIENT... POLICY`, `policy block CLIENT...`, and `policy unblock CLIENT...` verb forms that detect names, IPs, and MACs.
@@ -10,6 +13,11 @@
 - Add hints to empty views, a header row to interactive menus, and an interval/refresh-time header to `--watch`.
 - Regroup `--help` by task, trim trailing spaces from table rows, capitalize narrow-screen labels, and dim `--verbose` debug lines.
 - Add zsh completion (`completions/_keenetic`), installed by `make install` and the packaging definitions.
+- Add `clients --interactive` to pick a client with fzf or arrow keys and show its details.
+- Add pickers to `wake`, `connections`, `logs`, `wifi scan`, `diagnose`, `speedtest`, `clients rename`, `policy inspect`, `interfaces inspect`, and `policy --undo`, plus a top-level `keenetic --interactive` command menu.
+- Allow `policy --interactive` and `wake --interactive` to select several clients (Tab in fzf, Space in the arrow menu) and apply one action as a batch.
+- Add an Inspect action to the `interfaces --interactive` menu.
+- Ask for confirmation before `system reboot` in a terminal; `--yes` or `--quiet` skips it.
 
 ## 1.3.1 - 2026-09-15
 

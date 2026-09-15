@@ -20,7 +20,7 @@ fi
 unset KEENETIC_BASH_REEXEC
 
 PROGRAM=${0##*/}
-VERSION=1.3.1
+VERSION=1.4.0
 EXIT_GENERAL=1
 EXIT_USAGE=2
 EXIT_CLIENT=3
@@ -108,40 +108,48 @@ declare -a CLIENT_VALUES=()
 declare -a SELECTED_CLIENTS=()
 declare -a MENU_OPTIONS=()
 MENU_KIND=
+MENU_CANCEL_MESSAGE='No changes made.'
+MENU_MULTI=false
+SELECTED_VALUE=
+ASSUME_YES=false
+declare -a MENU_VALUES=()
+declare -a MENU_CHECKED=()
+declare -a SELECTED_VALUES=()
 declare -a POLICY_IDS=()
 declare -a POLICY_LABELS=()
 
 usage() {
     cat <<EOF
 Usage:
-  $PROGRAM [GLOBAL OPTIONS] [COMMAND] [COMMAND OPTIONS]
-  $PROGRAM --init [--router NAME] [--ca-file FILE|--insecure]
-  $PROGRAM --discover
+  $PROGRAM [GLOBAL OPTIONS] COMMAND [VERB] [TARGET...] [OPTIONS]
+  $PROGRAM --interactive
+  $PROGRAM config init [--router NAME] [--ca-file FILE|--insecure]
+  $PROGRAM config discover
 
-Status and monitoring:
-  (none)      Router summary: KeenDNS, connected clients, interfaces, traffic totals
-  interfaces  List interfaces; inspect ID, --rates, or --interactive connect/disconnect
-  wifi        Wi-Fi networks; wifi clients, wifi scan, wifi monitor
-  traffic     Rank clients by recent traffic (default: top five, last three minutes)
-  wan         Internet health, global connections, and DNS servers
-  dhcp        DHCP leases and static reservations
-  routes      IPv4 and IPv6 routes
-  mesh        Mesh nodes and backhaul links
-  connections Active NAT connections, optionally --client NAME|IP|MAC
-  forwards    Configured port-forwarding rules
-  vpn peers   WireGuard peer endpoints, handshakes, and counters
-  system      Health; system changes, system save, system reboot
-  logs        Recent router logs, optionally --filter TEXT
-  diagnose    Router-side ping/traceroute to HOST with related logs
-  speedtest   Bounded router-side iPerf3 test against --server HOST
+Commands (the first verb is the default):
+  status                           Router summary: KeenDNS, clients, interfaces, traffic
+  client    list|show|rename|wake|block|unblock|assign|nat
+                                   Devices: details, Wake-on-LAN, Internet block, policy, NAT
+  policy    list|show|assign|block|unblock|undo
+                                   Connection policies and the clients that use them
+  interface list|show|rates|up|down
+                                   Interfaces: status, details, live rates, enable/disable
+  wifi      list|clients|scan|load Wi-Fi networks, stations, nearby survey, channel load
+  vpn       peers                  WireGuard peers
+  traffic                          Top clients by recent traffic
+  wan | dhcp | routes | mesh | nat | forwards
+                                   Internet health, leases, routes, mesh, NAT table, forwards
+  system    show|changes|save|reboot
+                                   Router health and configuration persistence
+  logs                             Recent router logs, optionally --filter TEXT
+  diagnose  HOST                   Router-side ping and traceroute
+  speedtest --server HOST          Router-side iPerf3 throughput test
+  config    init|discover          Create the configuration; find the router
 
-Clients and policies:
-  clients     List clients; clients inspect NAME|IP|MAC; clients rename NAME NEW
-  policy      Connection policies: policy set CLIENT POLICY, policy block CLIENT,
-              policy unblock CLIENT, policy --undo, policy inspect POLICY, --interactive
-  wake        Wake-on-LAN for known clients, including offline ones
-
-Most read-only commands accept --json and --watch SECONDS (1–3600).
+Targets are client NAME|IP|MAC, interface ID, or policy NAME|ID; several clients
+may be given where it makes sense. Add -i/--interactive to pick targets instead;
+alone, -i offers a menu of commands. Most views accept --json and --watch SECONDS.
+Earlier spellings (clients inspect, policy set, interfaces --rates, --init, ...) still work.
 
 Setup and discovery:
       --init                     Configure and test router credentials
@@ -172,7 +180,7 @@ EOF
 # Closest known command by edit distance, for "did you mean" hints.
 suggest_command() {
     local word=${1,,} best='' best_distance=3 candidate distance
-    for candidate in policy wake interfaces traffic wifi clients system vpn diagnose logs wan dhcp routes mesh speedtest connections forwards; do
+    for candidate in status client clients policy interface interfaces wifi traffic wan dhcp routes mesh nat connections forwards vpn system logs diagnose speedtest wake config; do
         distance=$(awk -v a="$word" -v b="$candidate" 'BEGIN {
             n = length(a); m = length(b);
             for (i = 0; i <= n; i++) d[i, 0] = i;
@@ -194,10 +202,10 @@ suggest_command() {
 wifi_usage() {
     cat <<EOF
 Usage:
-  $PROGRAM wifi [--all] [--json]
-  $PROGRAM wifi monitor [--json] [--watch SECONDS]
+  $PROGRAM wifi [list] [--all] [--json] [--watch SECONDS]
   $PROGRAM wifi clients [--json] [--watch SECONDS]
-  $PROGRAM wifi scan [--radio ID] [--all] [--json]
+  $PROGRAM wifi scan [--radio ID|--interactive] [--all] [--json]
+  $PROGRAM wifi load [--all] [--json] [--watch SECONDS]
 
 List the router's Wi-Fi access-point networks with SSID, band, channel,
 channel width, security, connected-client count, and status.
@@ -208,8 +216,8 @@ channel width, security, connected-client count, and status.
 Each access point is listed separately, including networks sharing an SSID
 across radio bands. Missing information is shown as - or unknown. This command
 lists its own networks by default. 'wifi clients' shows station link details;
-'wifi scan' surveys nearby networks and cannot be watched. Scans may briefly
-affect Wi-Fi traffic.
+'wifi scan' surveys nearby networks and cannot be watched; 'wifi load' shows
+channel utilization per radio. Scans may briefly affect Wi-Fi traffic.
 Global options work before or after wifi. Run '$PROGRAM --help' for details.
 EOF
 }
@@ -236,44 +244,48 @@ EOF
 interfaces_usage() {
     cat <<EOF
 Usage:
-  $PROGRAM interfaces [--all] [--json]
-  $PROGRAM interfaces --interactive [--dry-run]
-  $PROGRAM interfaces inspect ID [--json] [--watch SECONDS]
-  $PROGRAM interfaces --rates [--sample SECONDS] [--all] [--json] [--watch SECONDS]
+  $PROGRAM interface [list] [--all] [--json] [--watch SECONDS]
+  $PROGRAM interface show ID|--interactive [--json] [--watch SECONDS]
+  $PROGRAM interface rates [--sample SECONDS] [--all] [--json] [--watch SECONDS]
+  $PROGRAM interface up|down ID [--dry-run]
+  $PROGRAM interface --interactive [--dry-run]
 
-      --rates                    Show sampled RX/TX rates and recent graphs
-      --sample SECONDS           Initial rate sample interval (1–60; default: 1)
+      --sample SECONDS           Initial rate sample interval for rates (1–60; default: 1)
       --all                      Include inactive interfaces in the listing
       --json                     Emit router address and interface data as JSON
       --watch SECONDS             Refresh the interface listing
-  -i, --interactive              Select an interface and Connect/Disconnect action
-      --dry-run                  Preview the selected action without changing it
+  -i, --interactive              Select an interface, then Connect, Disconnect, or Inspect
+      --dry-run                  Preview up/down or the selected action without changing it
 
-Interactive mode includes all interfaces and uses fzf when available, otherwise
-arrow keys. Esc or q cancels the arrow selector. Connect enables an interface;
-Disconnect disables it. Enabling does not guarantee a working link or VPN peer.
-Disabling the interface carrying your router connection can end this session.
+'up' enables an interface and 'down' disables it; both verify the new state.
+Enabling does not guarantee a working link or VPN peer. Disabling the interface
+carrying your router connection can end this session. Interactive mode includes
+all interfaces and uses fzf when available, otherwise arrow keys.
 
-Global options work before or after interfaces. Run '$PROGRAM --help' for details.
+Global options work before or after interface. Run '$PROGRAM --help' for details.
 EOF
 }
 
 policy_usage() {
     cat <<EOF
 Usage:
-  $PROGRAM policy [--all|--offline] [--json]
-  $PROGRAM policy --interactive
-  $PROGRAM policy CLIENT_NAME
-  $PROGRAM policy set NAME|IP|MAC... POLICY [--dry-run]
+  $PROGRAM policy [list] [--json] [--watch SECONDS]
+  $PROGRAM policy show POLICY|--interactive [--json] [--watch SECONDS]
+  $PROGRAM policy assign NAME|IP|MAC... POLICY [--dry-run]
   $PROGRAM policy block|unblock NAME|IP|MAC... [--dry-run]
+  $PROGRAM policy undo [--interactive] [--dry-run]
+  $PROGRAM policy --interactive [--all|--offline] [--dry-run]
+  $PROGRAM policy CLIENT_NAME
   $PROGRAM policy SELECTOR... (--policy POLICY|--block|--unblock) [--dry-run]
-  $PROGRAM policy --undo [--dry-run]
-  $PROGRAM policy inspect POLICY [--json] [--watch SECONDS]
 
-Verb forms detect whether each argument is a MAC, IP, or name. Selectors below
-do the same with explicit flags and can be mixed in one batch.
+'list' shows every policy with its ID and client count; 'show' adds the
+interfaces and clients of one policy. 'assign', 'block', and 'unblock' detect
+whether each target is a MAC, IP, or name (also available as client assign,
+client block, client unblock). --interactive picks one or more clients (Tab in
+fzf, Space in the arrow menu), then one policy for all of them. 'undo
+--interactive' picks which recorded change to restore instead of the newest.
 
-Selectors (repeatable for batch changes):
+Selectors for the flag form (repeatable for batch changes):
       --client NAME              Select by exact client name
       --ip ADDRESS               Select by exact IP address
       --mac ADDRESS              Select by exact MAC address
@@ -304,7 +316,7 @@ EOF
 read_command_usage() {
     case $COMMAND in
         wan|dhcp|routes|mesh|forwards)
-            printf 'Usage:\n  %s %s [--json] [--watch SECONDS]\n\n' "$PROGRAM" "$COMMAND"
+            printf 'Usage:\n  %s %s [list] [--json] [--watch SECONDS]\n\n' "$PROGRAM" "$COMMAND"
             case $COMMAND in
                 wan) printf 'Internet reachability, global connections, DNS, and connection checks.\n' ;;
                 dhcp) printf 'Current leases and configured static DHCP reservations.\n' ;;
@@ -312,14 +324,14 @@ read_command_usage() {
                 mesh) printf 'Mesh nodes, backhaul links, client counts, and controller status.\n' ;;
                 forwards) printf 'Configured port-forwarding rules and enabled state.\n' ;;
             esac ;;
-        connections) printf 'Usage:\n  %s connections [--client NAME|IP|MAC] [--json] [--watch SECONDS]\n\nShow active NAT connections; --client matches either direction, including translated addresses.\n' "$PROGRAM" ;;
-        speedtest) printf 'Usage:\n  %s speedtest --server HOST [--port PORT] [--duration SECONDS] [--reverse]\n      [--interface ID] [--json|--dry-run]\n\nRun TCP iPerf3 from the router to your server. Default: port 5201, 10 seconds, upload.\n--reverse measures download; duration must be 1–30 seconds. The server must run iPerf3.\nCtrl-C cancels the active test. Completed output does not guarantee a successful transfer.\n' "$PROGRAM" ;;
+        connections) printf 'Usage:\n  %s nat [--client NAME|IP|MAC|--interactive] [--json] [--watch SECONDS]\n  %s client nat NAME|IP|MAC [--json] [--watch SECONDS]\n\nShow active NAT connections; the client filter matches either direction, including\ntranslated addresses. --interactive picks the client from the known-client list.\n' "$PROGRAM" "$PROGRAM" ;;
+        speedtest) printf 'Usage:\n  %s speedtest --server HOST [--port PORT] [--duration SECONDS] [--reverse]\n      [--interface ID] [--json|--dry-run]\n  %s speedtest --interactive [OPTIONS]\n\n--interactive picks the server from known clients and the source interface from a list.\nRun TCP iPerf3 from the router to your server. Default: port 5201, 10 seconds, upload.\n--reverse measures download; duration must be 1–30 seconds. The server must run iPerf3.\nCtrl-C cancels the active test. Completed output does not guarantee a successful transfer.\n' "$PROGRAM" "$PROGRAM" ;;
         clients)
-            printf 'Usage:\n  %s clients [--all|--offline] [--json] [--watch SECONDS]\n  %s clients inspect NAME|IP|MAC [--json] [--watch SECONDS]\n  %s clients rename NAME|IP|MAC NEW_NAME [--dry-run]\n\nInspection includes offline clients. Use an IP or MAC to distinguish duplicate names.\nRenaming verifies the running name. Use system save to persist it.\n' "$PROGRAM" "$PROGRAM" "$PROGRAM" ;;
-        system) printf 'Usage:\n  %s system [--json] [--watch SECONDS]\n  %s system reboot [--dry-run]\n  %s system changes [--json] [--watch SECONDS]\n  %s system save [--dry-run]\n\nShow model, firmware, uptime, CPU, RAM, swap, and connection counts.\nReboot requests an immediate router restart and interrupts network access.\nUse --dry-run to preview it. Reboot and save cannot be combined with --watch or --json.\nSave persists the current running configuration and verifies the unsaved flag clears.\n' "$PROGRAM" "$PROGRAM" "$PROGRAM" "$PROGRAM" ;;
+            printf 'Usage:\n  %s client [list] [--all|--offline] [--json] [--watch SECONDS]\n  %s client show NAME|IP|MAC [--json] [--watch SECONDS]\n  %s client rename NAME|IP|MAC NEW_NAME [--dry-run]\n  %s client wake NAME|IP|MAC... [--dry-run]\n  %s client block|unblock NAME|IP|MAC... [--dry-run]\n  %s client assign NAME|IP|MAC... POLICY [--dry-run]\n  %s client nat NAME|IP|MAC [--json] [--watch SECONDS]\n\n  -i, --interactive              Pick the client(s) with fzf or arrow keys instead of naming them\n\nshow, rename, and nat search online and offline clients; use an IP or MAC to\ndistinguish duplicate names. Renaming verifies the running name; use system save\nto persist it. wake, block, unblock, and assign accept several clients.\n' "$PROGRAM" "$PROGRAM" "$PROGRAM" "$PROGRAM" "$PROGRAM" "$PROGRAM" "$PROGRAM" ;;
+        system) printf 'Usage:\n  %s system [show] [--json] [--watch SECONDS]\n  %s system reboot [--dry-run|--yes]\n  %s system changes [--json] [--watch SECONDS]\n  %s system save [--dry-run]\n\nShow model, firmware, uptime, CPU, RAM, swap, and connection counts.\nReboot requests an immediate router restart and interrupts network access.\nIn a terminal it asks for confirmation; --yes (-y) or --quiet skips the question.\nUse --dry-run to preview it. Reboot and save cannot be combined with --watch or --json.\nSave persists the current running configuration and verifies the unsaved flag clears.\n' "$PROGRAM" "$PROGRAM" "$PROGRAM" "$PROGRAM" ;;
         vpn) printf 'Usage:\n  %s vpn peers [--json] [--watch SECONDS]\n\nShow WireGuard peer endpoints, handshake age, online state, and cumulative RX/TX.\n' "$PROGRAM" ;;
-        diagnose) printf 'Usage:\n  %s diagnose HOST [--interface ID] [--json]\n\nRun four router-side pings and a bounded traceroute (12 hops), then show relevant\nrecent logs. Each test is limited to 60 seconds. Ctrl-C cancels the active test.\nCompletion means the tests ran; inspect their output for packet loss or failure.\n' "$PROGRAM" ;;
-        logs) printf 'Usage:\n  %s logs [--limit N] [--filter TEXT] [--json] [--watch SECONDS]\n\nRead the latest 20 log entries by default (maximum 1000). Filtering is literal\nand case-insensitive within those entries. Watch refreshes this view.\n' "$PROGRAM" ;;
+        diagnose) printf 'Usage:\n  %s diagnose HOST [--interface ID|--interactive] [--json]\n\n--interactive picks the source interface from a list.\nRun four router-side pings and a bounded traceroute (12 hops), then show relevant\nrecent logs. Each test is limited to 60 seconds. Ctrl-C cancels the active test.\nCompletion means the tests ran; inspect their output for packet loss or failure.\n' "$PROGRAM" ;;
+        logs) printf 'Usage:\n  %s logs [--limit N] [--filter TEXT|--interactive] [--json] [--watch SECONDS]\n\n--interactive picks a log source from the retrieved entries.\nRead the latest 20 log entries by default (maximum 1000). Filtering is literal\nand case-insensitive within those entries. Watch refreshes this view.\n' "$PROGRAM" ;;
     esac
     printf '\nGlobal options work before or after the command. Watch JSON emits one object per line.\n'
 }
@@ -327,14 +339,16 @@ read_command_usage() {
 wake_usage() {
     cat <<EOF
 Usage:
-  $PROGRAM [GLOBAL OPTIONS] wake SELECTOR... [--dry-run]
-  $PROGRAM wake CLIENT_NAME [--dry-run]
+  $PROGRAM client wake NAME|IP|MAC... [--dry-run]
+  $PROGRAM client wake --interactive [--dry-run]
+  $PROGRAM wake SELECTOR... [--dry-run]
 
 Selectors (repeatable; targets are deduplicated by MAC):
       --client NAME              Select by exact client name
       --ip ADDRESS               Select by exact IP address
       --mac ADDRESS              Select by exact MAC address
       --dry-run                  Preview without sending a Wake-on-LAN request
+  -i, --interactive              Pick one or more known clients, including offline ones
 
 All known clients are searched, including offline clients.
 Global options work before or after wake. Run '$PROGRAM --help' for the full list.
@@ -397,6 +411,116 @@ add_client_selector() {
     CLIENT_VALUES+=("$value")
 }
 
+declare -a CANONICAL_ARGS=()
+
+# True when the remaining policy arguments already name a client or an action,
+# in which case bare `policy` keeps its one-client picker semantics.
+has_policy_action_args() {
+    local word
+    for word in "$@"; do
+        case $word in
+            --client|--client=*|--ip|--ip=*|--mac|--mac=*|--policy|--policy=*|--block|--unblock|--undo|-i|--interactive) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+# Translate the verb grammar (client show X, interface up ID, config init, ...)
+# into the flag grammar the parser understands. Earlier spellings pass through
+# unchanged, so existing scripts keep working.
+canonicalize_args() {
+    local -a args=("$@")
+    local i=0 n=$# word group verb='' skip=0
+    CANONICAL_ARGS=()
+    while ((i < n)); do
+        word=${args[i]}
+        case $word in
+            --) CANONICAL_ARGS=("${args[@]}"); return 0 ;;
+            --router|--ca-file|--watch|--client|--ip|--mac|--policy|--top|--period|--interface|--limit|--filter|--server|--port|--duration|--sample|--radio)
+                CANONICAL_ARGS+=("$word" "${args[i + 1]-}"); i=$((i + 2)); continue ;;
+            -*) CANONICAL_ARGS+=("$word"); i=$((i + 1)); continue ;;
+        esac
+        break
+    done
+    ((i < n)) || return 0
+    group=${args[i]}; i=$((i + 1))
+    if ((i < n)) && [[ ${args[i]} != -* ]]; then verb=${args[i]}; fi
+    case $group in
+        status) ;;
+        client|clients)
+            case $verb in
+                '') CANONICAL_ARGS+=(clients) ;;
+                list) CANONICAL_ARGS+=(clients); skip=1 ;;
+                show|inspect) CANONICAL_ARGS+=(clients inspect); skip=1 ;;
+                rename) CANONICAL_ARGS+=(clients rename); skip=1 ;;
+                wake) CANONICAL_ARGS+=(wake); skip=1 ;;
+                block|unblock) CANONICAL_ARGS+=(policy "$verb"); skip=1 ;;
+                assign|set) CANONICAL_ARGS+=(policy set); skip=1 ;;
+                nat|connections)
+                    CANONICAL_ARGS+=(connections); skip=1
+                    if ((i + 1 < n)) && [[ ${args[i + 1]} != -* ]]; then CANONICAL_ARGS+=(--client "${args[i + 1]}"); skip=2; fi ;;
+                *) fail "$EXIT_USAGE" "unknown client verb: $verb. Use list, show, rename, wake, block, unblock, assign, or nat." ;;
+            esac ;;
+        policy|policies)
+            case $verb in
+                '') CANONICAL_ARGS+=(policy); has_policy_action_args "${args[@]:i}" || CANONICAL_ARGS+=(list) ;;
+                list) CANONICAL_ARGS+=(policy list); skip=1 ;;
+                show) CANONICAL_ARGS+=(policy inspect); skip=1 ;;
+                assign) CANONICAL_ARGS+=(policy set); skip=1 ;;
+                undo) CANONICAL_ARGS+=(policy --undo); skip=1 ;;
+                *) CANONICAL_ARGS+=(policy) ;;
+            esac ;;
+        interface|interfaces)
+            case $verb in
+                '') CANONICAL_ARGS+=(interfaces) ;;
+                list) CANONICAL_ARGS+=(interfaces); skip=1 ;;
+                show|inspect) CANONICAL_ARGS+=(interfaces inspect); skip=1 ;;
+                rates) CANONICAL_ARGS+=(interfaces --rates); skip=1 ;;
+                up|down) CANONICAL_ARGS+=(interfaces "$verb"); skip=1 ;;
+                *) fail "$EXIT_USAGE" "unknown interface verb: $verb. Use list, show, rates, up, or down." ;;
+            esac ;;
+        wifi)
+            case $verb in
+                ''|clients|scan|monitor) CANONICAL_ARGS+=(wifi) ;;
+                list) CANONICAL_ARGS+=(wifi); skip=1 ;;
+                load) CANONICAL_ARGS+=(wifi monitor); skip=1 ;;
+                *) fail "$EXIT_USAGE" "unknown wifi verb: $verb. Use list, clients, scan, or load." ;;
+            esac ;;
+        nat|connections)
+            CANONICAL_ARGS+=(connections)
+            [[ $verb != list && $verb != show ]] || skip=1 ;;
+        system)
+            CANONICAL_ARGS+=(system)
+            [[ $verb != show ]] || skip=1 ;;
+        log|logs)
+            CANONICAL_ARGS+=(logs)
+            [[ $verb != show ]] || skip=1 ;;
+        config)
+            case $verb in
+                init) CANONICAL_ARGS+=(--init); skip=1 ;;
+                discover) CANONICAL_ARGS+=(--discover); skip=1 ;;
+                '')
+                    local wants_help=false
+                    for word in "${args[@]:i}"; do
+                        [[ $word != -h && $word != --help ]] || wants_help=true
+                    done
+                    $wants_help || fail "$EXIT_USAGE" 'use config init or config discover'
+                    CANONICAL_ARGS+=(--init) ;;
+                *) fail "$EXIT_USAGE" "unknown config verb: $verb. Use init or discover." ;;
+            esac ;;
+        wan|dhcp|routes|mesh|forwards|traffic|vpn)
+            CANONICAL_ARGS+=("$group")
+            [[ $verb != list && $verb != show ]] || skip=1 ;;
+        *) CANONICAL_ARGS+=("$group") ;;
+    esac
+    CANONICAL_ARGS+=("${args[@]:i + skip}")
+}
+
+validate_client_name() {
+    [[ -n $1 && ${#1} -le 255 && $1 != *[[:cntrl:]]* ]] \
+        || fail "$EXIT_USAGE" 'client name must contain 1–255 characters without control characters'
+}
+
 # Positional NAME|IP|MAC selectors for verb-style policy commands.
 add_auto_selector() {
     local value=$1
@@ -419,10 +543,12 @@ set_action() {
 parse_args() {
     local scope=root selector help=false version=false suggestion
     local -a positional=()
+    canonicalize_args "$@"
+    set -- "${CANONICAL_ARGS[@]}"
     while (($#)); do
         if [[ $scope == root ]]; then
             case $1 in
-                policy|wake|interfaces|traffic|wifi|clients|system|vpn|diagnose|logs|wan|dhcp|routes|mesh|speedtest|connections|forwards|--watch|--watch=*|--all|--json|--init|--discover|--router|--router=*|--ca-file|--ca-file=*|--insecure|-q|--quiet|-v|--verbose|--color|--color=*|--no-color|-h|--help|-V|--version) ;;
+                policy|wake|interfaces|traffic|wifi|clients|system|vpn|diagnose|logs|wan|dhcp|routes|mesh|speedtest|connections|forwards|--watch|--watch=*|--all|--json|--init|--discover|-i|--interactive|--router|--router=*|--ca-file|--ca-file=*|--insecure|-q|--quiet|-v|--verbose|--color|--color=*|--no-color|-h|--help|-V|--version) ;;
                 -*) fail "$EXIT_USAGE" "unknown command or option: $1. Run '$PROGRAM --help'." ;;
                 *) suggestion=$(suggest_command "$1")
                    [[ -z $suggestion ]] || suggestion=" Did you mean '$PROGRAM $suggestion'?"
@@ -432,6 +558,7 @@ parse_args() {
             case $1 in
                 --json|--watch|--watch=*|--router|--router=*|--ca-file|--ca-file=*|--insecure|-q|--quiet|-v|--verbose|--color|--color=*|--no-color|-h|--help|-V|--version) ;;
                 --client|--client=*) [[ $scope == connections ]] || fail "$EXIT_USAGE" '--client is only valid for connections' ;;
+                -i|--interactive) [[ $scope == connections || $scope == speedtest ]] || fail "$EXIT_USAGE" "$1 is not valid for $scope" ;;
                 --server|--server=*|--port|--port=*|--duration|--duration=*|--reverse|--interface|--interface=*|--dry-run)
                     [[ $scope == speedtest ]] || fail "$EXIT_USAGE" "$1 is only valid for speedtest" ;;
                 *) fail "$EXIT_USAGE" "unknown option for $scope: $1" ;;
@@ -441,13 +568,15 @@ parse_args() {
                 --json|--watch|--watch=*|--router|--router=*|--ca-file|--ca-file=*|--insecure|-q|--quiet|-v|--verbose|--color|--color=*|--no-color|-h|--help|-V|--version|--) ;;
                 --dry-run) [[ $scope == system || $scope == clients ]] || fail "$EXIT_USAGE" "$1 is only valid for system actions or clients rename" ;;
                 --all|--offline) [[ $scope == clients ]] || fail "$EXIT_USAGE" "$1 is only valid for client listings" ;;
+                -i|--interactive) [[ $scope == clients || $scope == diagnose || $scope == logs ]] || fail "$EXIT_USAGE" "$1 is not valid for $scope" ;;
+                -y|--yes) [[ $scope == system ]] || fail "$EXIT_USAGE" "$1 is only valid for system reboot" ;;
                 --interface|--interface=*) [[ $scope == diagnose || $scope == speedtest ]] || fail "$EXIT_USAGE" "$1 is only valid for diagnose" ;;
                 --limit|--limit=*|--filter|--filter=*) [[ $scope == logs ]] || fail "$EXIT_USAGE" "$1 is only valid for logs" ;;
                 -*) fail "$EXIT_USAGE" "unknown option for $scope: $1" ;;
             esac
         elif [[ $scope == wifi ]]; then
             case $1 in
-                monitor|clients|scan|--radio|--radio=*|--watch|--watch=*|--all|--json|--router|--router=*|--ca-file|--ca-file=*|--insecure|-q|--quiet|-v|--verbose|--color|--color=*|--no-color|-h|--help|-V|--version) ;;
+                monitor|clients|scan|-i|--interactive|--radio|--radio=*|--watch|--watch=*|--all|--json|--router|--router=*|--ca-file|--ca-file=*|--insecure|-q|--quiet|-v|--verbose|--color|--color=*|--no-color|-h|--help|-V|--version) ;;
                 *) fail "$EXIT_USAGE" "unknown option for wifi: $1. Run '$PROGRAM wifi --help'." ;;
             esac
         elif [[ $scope == traffic ]]; then
@@ -462,7 +591,7 @@ parse_args() {
             esac
         elif [[ $scope == wake ]]; then
             case $1 in
-                --client|--client=*|--ip|--ip=*|--mac|--mac=*|--dry-run|--router|--router=*|--ca-file|--ca-file=*|--insecure|-q|--quiet|-v|--verbose|--color|--color=*|--no-color|-h|--help|-V|--version|--) ;;
+                --client|--client=*|--ip|--ip=*|--mac|--mac=*|-i|--interactive|--dry-run|--router|--router=*|--ca-file|--ca-file=*|--insecure|-q|--quiet|-v|--verbose|--color|--color=*|--no-color|-h|--help|-V|--version|--) ;;
                 -*) fail "$EXIT_USAGE" "unknown option for wake: $1. Run '$PROGRAM wake --help'." ;;
             esac
         fi
@@ -486,6 +615,9 @@ parse_args() {
                 ;;
             -i|--interactive)
                 INTERACTIVE=true
+                ;;
+            -y|--yes)
+                ASSUME_YES=true
                 ;;
             --rates) [[ $scope == interfaces ]] || fail "$EXIT_USAGE" '--rates is only valid for interfaces'; INTERFACE_RATES=true ;;
             --reverse) [[ $scope == speedtest ]] || fail "$EXIT_USAGE" '--reverse is only valid for speedtest'; SPEED_REVERSE=true ;;
@@ -692,21 +824,31 @@ parse_args() {
         clients)
             if ((${#positional[@]})); then
                 case ${positional[0]} in
-                    inspect) [[ ${#positional[@]} == 2 ]] || fail "$EXIT_USAGE" 'use clients inspect NAME|IP|MAC' ;;
+                    inspect)
+                        [[ ${#positional[@]} == 2 ]] || { $INTERACTIVE && [[ ${#positional[@]} == 1 ]]; } \
+                            || fail "$EXIT_USAGE" 'use clients inspect NAME|IP|MAC, or clients inspect --interactive' ;;
                     rename)
-                        [[ ${#positional[@]} == 3 ]] || fail "$EXIT_USAGE" 'use clients rename NAME|IP|MAC NEW_NAME'
-                        NEW_CLIENT_NAME=${positional[2]}
-                        [[ -n $NEW_CLIENT_NAME && ${#NEW_CLIENT_NAME} -le 255 && $NEW_CLIENT_NAME != *[[:cntrl:]]* ]] || fail "$EXIT_USAGE" 'client name must contain 1–255 characters without control characters'
+                        if $INTERACTIVE; then
+                            [[ ${#positional[@]} == 1 ]] || fail "$EXIT_USAGE" 'clients rename --interactive picks the client and asks for the new name'
+                        else
+                            [[ ${#positional[@]} == 3 ]] || fail "$EXIT_USAGE" 'use clients rename NAME|IP|MAC NEW_NAME, or clients rename --interactive'
+                            NEW_CLIENT_NAME=${positional[2]}
+                            validate_client_name "$NEW_CLIENT_NAME"
+                        fi
                         ;;
                     *) fail "$EXIT_USAGE" 'use clients inspect or clients rename' ;;
                 esac
-                SUBCOMMAND=${positional[0]}; INSPECT_QUERY=${positional[1]}; positional=()
+                SUBCOMMAND=${positional[0]}; INSPECT_QUERY=${positional[1]-}; positional=()
             fi ;;
         policy)
             case ${positional[0]-} in
+                list)
+                    [[ ${#positional[@]} == 1 ]] || fail "$EXIT_USAGE" 'policy list takes no arguments'
+                    SUBCOMMAND=list; positional=() ;;
                 inspect)
-                    [[ ${#positional[@]} == 2 ]] || fail "$EXIT_USAGE" 'policy inspect requires a policy ID or description'
-                    SUBCOMMAND=inspect; INSPECT_QUERY=${positional[1]}; positional=() ;;
+                    [[ ${#positional[@]} == 2 ]] || { $INTERACTIVE && [[ ${#positional[@]} == 1 ]]; } \
+                        || fail "$EXIT_USAGE" 'policy show requires a policy name or ID, or --interactive'
+                    SUBCOMMAND=inspect; INSPECT_QUERY=${positional[1]-}; positional=() ;;
                 set)
                     ((${#positional[@]} >= 3)) || fail "$EXIT_USAGE" 'use policy set NAME|IP|MAC... POLICY'
                     set_action policy
@@ -737,8 +879,17 @@ parse_args() {
             fi ;;
         interfaces)
             if ((${#positional[@]})); then
-                [[ ${#positional[@]} == 2 && ${positional[0]} == inspect ]] || fail "$EXIT_USAGE" 'use interfaces inspect ID'
-                SUBCOMMAND=inspect; INSPECT_QUERY=${positional[1]}; positional=()
+                case ${positional[0]} in
+                    inspect)
+                        if [[ ${#positional[@]} != 2 ]] && { ! $INTERACTIVE || [[ ${#positional[@]} != 1 ]]; }; then
+                            fail "$EXIT_USAGE" 'use interface show ID, or interface show --interactive'
+                        fi ;;
+                    up|down)
+                        [[ ${#positional[@]} == 2 && -n ${positional[1]} ]] || fail "$EXIT_USAGE" "use interface ${positional[0]} ID"
+                        ! $INTERACTIVE || fail "$EXIT_USAGE" "interface ${positional[0]} takes an ID; use interface --interactive to pick one" ;;
+                    *) fail "$EXIT_USAGE" 'use interface list, show ID, rates, up ID, or down ID' ;;
+                esac
+                SUBCOMMAND=${positional[0]}; INSPECT_QUERY=${positional[1]-}; positional=()
             fi ;;
         logs|wan|dhcp|routes|mesh|speedtest|connections|forwards) ((${#positional[@]} == 0)) || fail "$EXIT_USAGE" "$COMMAND does not accept positional arguments" ;;
         diagnose)
@@ -746,9 +897,15 @@ parse_args() {
             DIAG_HOST=${positional[0]}; positional=()
             [[ $DIAG_HOST =~ ^[a-zA-Z0-9:][a-zA-Z0-9.:%_-]*$ && ${#DIAG_HOST} -le 253 ]] || fail "$EXIT_USAGE" 'invalid diagnostic hostname or IP address' ;;
     esac
-    if [[ $SUBCOMMAND == reboot || $SUBCOMMAND == save || $SUBCOMMAND == rename ]]; then
-        if [[ -n $WATCH_INTERVAL ]] || $JSON_OUTPUT || $INTERACTIVE || [[ $VIEW_MODE != connected ]] || ((${#CLIENT_SELECTORS[@]})); then
+    if [[ $SUBCOMMAND == reboot || $SUBCOMMAND == save || $SUBCOMMAND == rename || $SUBCOMMAND == up || $SUBCOMMAND == down ]]; then
+        if [[ -n $WATCH_INTERVAL ]] || $JSON_OUTPUT || { $INTERACTIVE && [[ $SUBCOMMAND != rename ]]; } || [[ $VIEW_MODE != connected ]] || ((${#CLIENT_SELECTORS[@]})); then
             fail "$EXIT_USAGE" "$COMMAND $SUBCOMMAND cannot be combined with listing or interactive options"
+        fi
+    fi
+    if [[ $COMMAND == policy && $SUBCOMMAND == list ]]; then
+        [[ $VIEW_MODE == connected ]] || fail "$EXIT_USAGE" 'policy list shows policies; use client list --all or --offline for clients'
+        if $INTERACTIVE || $UNDO || $DRY_RUN || [[ -n $ACTION ]] || ((${#CLIENT_SELECTORS[@]})); then
+            fail "$EXIT_USAGE" 'policy list cannot be combined with client selectors or actions'
         fi
     fi
     if [[ $COMMAND == interfaces ]]; then
@@ -757,17 +914,19 @@ parse_args() {
         if $INTERFACE_RATES && { $INTERACTIVE || [[ $SUBCOMMAND == inspect ]]; }; then fail "$EXIT_USAGE" '--rates is only valid for interface listings'; fi
     fi
     if [[ $COMMAND == wifi ]]; then
+        ! $INTERACTIVE || [[ $SUBCOMMAND == scan ]] || fail "$EXIT_USAGE" '--interactive picks a radio for wifi scan'
         [[ -z $SCAN_RADIO || $SUBCOMMAND == scan ]] || fail "$EXIT_USAGE" '--radio requires wifi scan'
         [[ $SUBCOMMAND != clients || $VIEW_MODE == connected ]] || fail "$EXIT_USAGE" 'wifi clients lists associated stations only'
     fi
     if [[ $COMMAND == speedtest ]]; then
-        [[ $SPEED_SERVER =~ ^[a-zA-Z0-9:][a-zA-Z0-9.:%_-]*$ && ${#SPEED_SERVER} -le 253 ]] || fail "$EXIT_USAGE" 'speedtest requires --server HOST'
+        { $INTERACTIVE && [[ -z $SPEED_SERVER ]]; } || [[ $SPEED_SERVER =~ ^[a-zA-Z0-9:][a-zA-Z0-9.:%_-]*$ && ${#SPEED_SERVER} -le 253 ]] \
+            || fail "$EXIT_USAGE" 'speedtest requires --server HOST, or --interactive to pick one'
         if ! { [[ $SPEED_PORT =~ ^[1-9][0-9]{0,4}$ ]] && ((SPEED_PORT <= 65535)); }; then fail "$EXIT_USAGE" '--port must be between 1 and 65535'; fi
         if ! { [[ $SPEED_DURATION =~ ^[1-9][0-9]?$ ]] && ((SPEED_DURATION <= 30)); }; then fail "$EXIT_USAGE" '--duration must be between 1 and 30 seconds'; fi
         $DRY_RUN && $JSON_OUTPUT && fail "$EXIT_USAGE" 'speedtest --dry-run cannot be combined with --json'
     fi
-    [[ $SUBCOMMAND != inspect && $SUBCOMMAND != rename || -n $INSPECT_QUERY ]] || fail "$EXIT_USAGE" 'inspect requires a non-empty name or ID'
-    if [[ $SUBCOMMAND == inspect ]] && { $INTERACTIVE || $DRY_RUN || $UNDO || [[ -n $ACTION ]] || ((${#CLIENT_SELECTORS[@]})); }; then
+    [[ $SUBCOMMAND != inspect && $SUBCOMMAND != rename || -n $INSPECT_QUERY ]] || $INTERACTIVE || fail "$EXIT_USAGE" 'inspect requires a non-empty name or ID'
+    if [[ $SUBCOMMAND == inspect ]] && { { $INTERACTIVE && [[ -n $INSPECT_QUERY ]]; } || $DRY_RUN || $UNDO || [[ -n $ACTION ]] || ((${#CLIENT_SELECTORS[@]})); }; then
         fail "$EXIT_USAGE" 'inspect cannot be combined with client selectors or actions'
     fi
     if [[ $COMMAND == logs ]]; then
@@ -776,7 +935,7 @@ parse_args() {
         fi
     fi
     for value in "${positional[@]}"; do
-        add_client_selector client "$value"
+        add_auto_selector "$value"
     done
     if [[ -n $ROUTER_PROFILE ]]; then
         [[ $ROUTER_PROFILE =~ ^[A-Za-z0-9._-]+$ ]] \
@@ -790,8 +949,12 @@ parse_args() {
         $INIT_CONFIG || $INTERACTIVE || $JSON_OUTPUT || $UNDO || [[ -n $ACTION ]] || ((${#CLIENT_SELECTORS[@]} > 0)) \
             && fail "$EXIT_USAGE" '--discover must be used alone'
     fi
+    ! $ASSUME_YES || [[ $SUBCOMMAND == reboot ]] || fail "$EXIT_USAGE" '--yes is only valid for system reboot'
+    if [[ $COMMAND == connections ]] && $INTERACTIVE && [[ -n $INSPECT_QUERY ]]; then
+        fail "$EXIT_USAGE" '--interactive picks the client itself; drop --client'
+    fi
     if $UNDO; then
-        $INTERACTIVE || $JSON_OUTPUT || $INIT_CONFIG || [[ -n $ACTION ]] || ((${#CLIENT_SELECTORS[@]} > 0)) \
+        $JSON_OUTPUT || $INIT_CONFIG || [[ -n $ACTION ]] || ((${#CLIENT_SELECTORS[@]} > 0)) \
             && fail "$EXIT_USAGE" '--undo cannot be combined with another action or client selector'
     fi
     if $INIT_CONFIG; then
@@ -801,17 +964,17 @@ parse_args() {
     if $JSON_OUTPUT && { $INTERACTIVE || [[ -n $ACTION ]] || ((${#CLIENT_SELECTORS[@]} > 0)); }; then
         fail "$EXIT_USAGE" '--json is only valid for non-interactive listings'
     fi
-    if [[ -n $ACTION ]] && ((${#CLIENT_SELECTORS[@]} == 0)); then
-        fail "$EXIT_USAGE" 'an action requires at least one --client, --ip, or --mac selector'
+    if [[ -n $ACTION ]] && ((${#CLIENT_SELECTORS[@]} == 0)) && ! $INTERACTIVE; then
+        fail "$EXIT_USAGE" 'an action requires at least one --client, --ip, or --mac selector, or --interactive'
     fi
-    if $INTERACTIVE && { [[ -n $ACTION ]] || ((${#CLIENT_SELECTORS[@]} > 0)); }; then
+    if $INTERACTIVE && { [[ -n $ACTION && $ACTION != wake ]] || ((${#CLIENT_SELECTORS[@]} > 0)); }; then
         fail "$EXIT_USAGE" '--interactive selects the client and action itself'
     fi
     if ((${#CLIENT_SELECTORS[@]} > 1)) && [[ -z $ACTION ]]; then
         fail "$EXIT_USAGE" 'multiple client selectors require an explicit action'
     fi
-    if $DRY_RUN && [[ -z $ACTION && $SUBCOMMAND != reboot && $SUBCOMMAND != save && $SUBCOMMAND != rename && $COMMAND != speedtest ]] && ! $INTERACTIVE && ! $UNDO; then
-        fail "$EXIT_USAGE" '--dry-run requires an action, --interactive, --undo, or system reboot'
+    if $DRY_RUN && [[ -z $ACTION && $SUBCOMMAND != reboot && $SUBCOMMAND != save && $SUBCOMMAND != rename && $SUBCOMMAND != up && $SUBCOMMAND != down && $COMMAND != speedtest ]] && ! $INTERACTIVE && ! $UNDO; then
+        fail "$EXIT_USAGE" '--dry-run requires an action, --interactive, undo, interface up/down, or system reboot'
     fi
     if [[ -n $WATCH_INTERVAL ]]; then
         if ! { [[ $WATCH_INTERVAL =~ ^[1-9][0-9]{0,3}$ ]] && ((WATCH_INTERVAL <= 3600)); }; then
@@ -1943,7 +2106,7 @@ format_menu_option() {
     elif [[ $MENU_KIND == client ]]; then
         IFS=$'\t' read -r name ip policy status <<< "${MENU_OPTIONS[index]}"
         [[ $status == online ]] || name="$name (offline)"
-        compute_client_widths 4
+        compute_client_widths "$($MENU_MULTI && printf 6 || printf 4)"
         fitted_name=$(shorten_text "$name" "$CLIENT_NAME_WIDTH")
         fitted_ip=$(shorten_text "$ip" "$CLIENT_IP_WIDTH")
         fitted_policy=$(shorten_text "$policy" "$CLIENT_POLICY_WIDTH")
@@ -1969,7 +2132,9 @@ render_arrow_menu() {
     for ((index = 0; index < count; index++)); do
         marker=' '
         style=
-        if ((index == MENU_CURRENT_INDEX)); then
+        if $MENU_MULTI; then
+            if [[ ${MENU_CHECKED[index]:-0} == 1 ]]; then marker='[x]'; else marker='[ ]'; fi
+        elif ((index == MENU_CURRENT_INDEX)); then
             marker='*'
             style=$DIM
         fi
@@ -1998,13 +2163,20 @@ arrow_menu() {
     MENU_RESIZED=false
     trap 'MENU_RESIZED=true' WINCH
     printf '\033[?25l' >&2
-    printf 'Use Up/Down arrows, Enter to select, or Esc/q to cancel.\n' >&2
+    if $MENU_MULTI; then
+        MENU_CHECKED=()
+        printf 'Use Up/Down arrows, Space to toggle, Enter to confirm, or Esc/q to cancel.\n' >&2
+    else
+        printf 'Use Up/Down arrows, Enter to select, or Esc/q to cancel.\n' >&2
+    fi
+    local indent='    '
+    $MENU_MULTI && indent='      '
     if [[ $MENU_KIND == client ]]; then
-        compute_client_widths 4
-        printf "    %s%-${CLIENT_NAME_WIDTH}.${CLIENT_NAME_WIDTH}s %-${CLIENT_IP_WIDTH}.${CLIENT_IP_WIDTH}s %-${CLIENT_POLICY_WIDTH}.${CLIENT_POLICY_WIDTH}s%s\n" \
-            "$DIM" 'NAME' 'IP ADDRESS' 'POLICY' "$RESET" >&2
+        compute_client_widths "${#indent}"
+        printf "%s%s%-${CLIENT_NAME_WIDTH}.${CLIENT_NAME_WIDTH}s %-${CLIENT_IP_WIDTH}.${CLIENT_IP_WIDTH}s %-${CLIENT_POLICY_WIDTH}.${CLIENT_POLICY_WIDTH}s%s\n" \
+            "$indent" "$DIM" 'NAME' 'IP ADDRESS' 'POLICY' "$RESET" >&2
     elif [[ $MENU_KIND == interface ]]; then
-        printf '    %s%s%s\n' "$DIM" "$(list_interface_status false true true)" "$RESET" >&2
+        printf '%s%s%s%s\n' "$indent" "$DIM" "$(list_interface_status false true true)" "$RESET" >&2
     fi
     render_arrow_menu "$selected" false
     while true; do
@@ -2028,6 +2200,10 @@ arrow_menu() {
             $'\033[B'|j)
                 selected=$(((selected + 1) % count))
                 ;;
+            ' ')
+                $MENU_MULTI || continue
+                if [[ ${MENU_CHECKED[selected]:-0} == 1 ]]; then MENU_CHECKED[selected]=0; else MENU_CHECKED[selected]=1; fi
+                ;;
             '')
                 SELECTED_INDEX=$((selected + 1))
                 trap - WINCH
@@ -2045,6 +2221,55 @@ arrow_menu() {
         esac
         render_arrow_menu "$selected" true
     done
+}
+
+# Generic picker over "VALUE<TAB>LABEL" lines supplied on fd 3 (`3< <(...)`). Sets SELECTED_VALUE and
+# SELECTED_VALUES; returns 1 after printing MENU_CANCEL_MESSAGE when cancelled.
+pick_from_list() {
+    local heading=$1 prompt=$2 multi=${3:-false} value label line index selected
+    local -a fzf_args
+    MENU_OPTIONS=(); MENU_VALUES=(); MENU_CURRENT_INDEX=-1; MENU_KIND=generic
+    SELECTED_VALUE=; SELECTED_VALUES=()
+    # Rows arrive on fd 3 so that stdin stays attached to the terminal for the menu.
+    while IFS=$'\t' read -r -u 3 value label; do
+        MENU_VALUES+=("$value"); MENU_OPTIONS+=("${label:-$value}")
+    done
+    ((${#MENU_OPTIONS[@]})) || fail "no ${prompt,,} options are available"
+    if [[ -t 0 && -t 2 ]] && command -v "$FZF_COMMAND" >/dev/null 2>&1; then
+        fzf_args=(--delimiter=$'\t' --with-nth=2.. --height=70% --layout=reverse --prompt="$prompt> " --header="$heading")
+        ! $multi || fzf_args+=(--multi --header="$heading"$'\n''Tab marks several entries; Enter confirms.')
+        selected=$(
+            for ((index = 0; index < ${#MENU_VALUES[@]}; index++)); do
+                printf '%s\t%s\n' "${MENU_VALUES[index]}" "${MENU_OPTIONS[index]}"
+            done | "$FZF_COMMAND" "${fzf_args[@]}"
+        ) || { unchanged "$MENU_CANCEL_MESSAGE"; return 1; }
+        while IFS= read -r line; do SELECTED_VALUES+=("${line%%$'\t'*}"); done <<< "$selected"
+        SELECTED_VALUE=${SELECTED_VALUES[0]}
+        return 0
+    fi
+    printf '%s\n\n' "$heading" >&2
+    MENU_MULTI=$multi
+    if ! arrow_menu "${prompt,,}"; then
+        MENU_MULTI=false
+        unchanged "$MENU_CANCEL_MESSAGE"
+        return 1
+    fi
+    MENU_MULTI=false
+    if $multi; then
+        for ((index = 0; index < ${#MENU_VALUES[@]}; index++)); do
+            [[ ${MENU_CHECKED[index]:-0} == 1 ]] && SELECTED_VALUES+=("${MENU_VALUES[index]}")
+        done
+    fi
+    ((${#SELECTED_VALUES[@]})) || SELECTED_VALUES=("${MENU_VALUES[SELECTED_INDEX - 1]}")
+    SELECTED_VALUE=${SELECTED_VALUES[0]}
+}
+
+# "VALUE<TAB>LABEL" rows for router interfaces, VPN first, with a default entry.
+interface_menu_rows() {
+    printf '__default__\tRouter default (no source interface)\n'
+    jq -r '.interfaces | sort_by(if .vpn then 0 else 1 end)[]
+        | [.id, (.id + (if (.description // "") == "" then "" else "  " + .description end) + "  (" + .status + ")")] | @tsv' \
+        "$TMP_DIR/status.json"
 }
 
 fzf_client_rows() {
@@ -2069,7 +2294,9 @@ fzf_client_rows() {
 }
 
 select_client_from_candidates() {
-    local candidates=$1 heading=$2 count name ip mac policy online display_name index=0 selected selected_index header
+    local candidates=$1 heading=$2 multi=${3:-false} count name ip mac policy online display_name index=0 selected selected_index header line
+    local -a fzf_args
+    SELECTED_CLIENTS=()
     count=$(jq 'length' <<< "$candidates")
     ((count > 0)) || fail "$EXIT_CLIENT" 'no matching clients found'
     jq --arg current "$CURRENT_CLIENT_MAC" \
@@ -2080,22 +2307,24 @@ select_client_from_candidates() {
         compute_client_widths 12
         printf -v header "%-${CLIENT_NAME_WIDTH}s %-${CLIENT_IP_WIDTH}s %-${CLIENT_POLICY_WIDTH}s %-7s" \
             'NAME' 'IP' 'POLICY' 'STATUS'
-        selected=$(
-            fzf_client_rows \
-            | "$FZF_COMMAND" --delimiter=$'\t' --with-nth=2.. --height=70% --layout=reverse \
-                --prompt='Client> ' --header="$heading"$'\n'"$header"
-        ) || {
-            unchanged 'No changes made.'
+        fzf_args=(--delimiter=$'\t' --with-nth=2.. --height=70% --layout=reverse --prompt='Client> ' --header="$heading"$'\n'"$header")
+        ! $multi || fzf_args+=(--multi --header="$heading (Tab marks several; Enter confirms)"$'\n'"$header")
+        selected=$(fzf_client_rows | "$FZF_COMMAND" "${fzf_args[@]}") || {
+            unchanged "$MENU_CANCEL_MESSAGE"
             return 1
         }
-        selected_index=${selected%%$'\t'*}
-        SELECTED_CLIENT=$(jq -c --argjson index "$selected_index" '.[$index]' "$TMP_DIR/menu-clients.json")
+        while IFS= read -r line; do
+            selected_index=${line%%$'\t'*}
+            SELECTED_CLIENTS+=("$(jq -c --argjson index "$selected_index" '.[$index]' "$TMP_DIR/menu-clients.json")")
+        done <<< "$selected"
+        SELECTED_CLIENT=${SELECTED_CLIENTS[0]}
         return 0
     fi
 
     MENU_OPTIONS=()
     MENU_CURRENT_INDEX=-1
     MENU_KIND=client
+    MENU_MULTI=$multi
     while IFS=$'\t' read -r name ip mac policy online; do
         display_name=$name
         if [[ -n $CURRENT_CLIENT_MAC && $mac == "$CURRENT_CLIENT_MAC" ]]; then
@@ -2112,11 +2341,20 @@ select_client_from_candidates() {
 
     printf '%s\n\n' "$heading" >&2
     if ! arrow_menu client; then
-        unchanged 'No changes made.'
+        MENU_MULTI=false
+        unchanged "$MENU_CANCEL_MESSAGE"
         return 1
     fi
-    SELECTED_CLIENT=$(jq -c --argjson index "$((SELECTED_INDEX - 1))" \
-        '.[$index]' "$TMP_DIR/menu-clients.json")
+    MENU_MULTI=false
+    if $multi; then
+        for ((index = 0; index < ${#MENU_OPTIONS[@]}; index++)); do
+            [[ ${MENU_CHECKED[index]:-0} == 1 ]] \
+                && SELECTED_CLIENTS+=("$(jq -c --argjson index "$index" '.[$index]' "$TMP_DIR/menu-clients.json")")
+        done
+    fi
+    ((${#SELECTED_CLIENTS[@]})) \
+        || SELECTED_CLIENTS=("$(jq -c --argjson index "$((SELECTED_INDEX - 1))" '.[$index]' "$TMP_DIR/menu-clients.json")")
+    SELECTED_CLIENT=${SELECTED_CLIENTS[0]}
 }
 
 resolve_client() {
@@ -2181,11 +2419,28 @@ ambiguous_lookup() {
 }
 
 select_any_client() {
-    local clients heading='Connected clients:'
+    local multi=${1:-false} clients heading='Connected clients:'
     clients=$(cat "$TMP_DIR/connected.json")
     [[ $VIEW_MODE == all ]] && heading='Known clients:'
     [[ $VIEW_MODE == offline ]] && heading='Offline clients:'
-    select_client_from_candidates "$clients" "$heading"
+    select_client_from_candidates "$clients" "$heading" "$multi"
+}
+
+# Confirm an interactive block for SELECTED_CLIENTS that are not already blocked.
+confirm_block_interactively() {
+    local answer pending=0 client
+    $DRY_RUN && return 0
+    for client in "${SELECTED_CLIENTS[@]}"; do
+        [[ $(client_policy_id "$client") == __block__ ]] || ((pending += 1))
+    done
+    ((pending > 0)) || return 0
+    if ((${#SELECTED_CLIENTS[@]} == 1)); then
+        printf 'Block Internet access for %s? [y/N]: ' "$(jq -r '.name' <<< "${SELECTED_CLIENTS[0]}")" >&2
+    else
+        printf 'Block Internet access for %d clients? [y/N]: ' "$pending" >&2
+    fi
+    IFS= read -r answer || fail 'confirmation input ended unexpectedly'
+    [[ ${answer,,} == y || ${answer,,} == yes ]] || { unchanged 'No changes made.'; return 1; }
 }
 
 client_policy_id() {
@@ -2214,11 +2469,17 @@ load_policy_options() {
 }
 
 choose_policy_interactively() {
-    local client=$1 name ip current_id current_label index option selected selected_id
+    local client=$1 batch=${2:-1} name ip current_id current_label index option selected selected_id heading
     name=$(jq -r '.name' <<< "$client")
     ip=$(jq -r '.ip' <<< "$client")
     current_id=$(client_policy_id "$client")
     current_label=$(client_policy_label "$client")
+    if ((batch > 1)); then
+        current_id=; current_label=
+        heading="Clients: $batch selected"
+    else
+        heading="Client: $name ($ip) | Current: $current_label"
+    fi
     load_policy_options
 
     if [[ -t 0 && -t 2 ]] && command -v "$FZF_COMMAND" >/dev/null 2>&1; then
@@ -2233,7 +2494,7 @@ choose_policy_interactively() {
                     printf '%s\t%s\n' "${POLICY_IDS[index]}" "${POLICY_LABELS[index]}"
                 done
             } | "$FZF_COMMAND" --delimiter=$'\t' --with-nth=2.. --height=70% --layout=reverse \
-                --prompt='Policy> ' --header="Client: $name ($ip) | Current: $current_label"
+                --prompt='Policy> ' --header="$heading"
         ) || {
             unchanged 'No changes made.'
             return 1
@@ -2261,8 +2522,12 @@ choose_policy_interactively() {
         MENU_OPTIONS+=("$option")
     done
 
-    printf 'Client: %s (%s)\n' "$name" "$ip" >&2
-    printf 'Current policy: %s\n\n' "$current_label" >&2
+    if ((batch > 1)); then
+        printf '%s\n\n' "$heading" >&2
+    else
+        printf 'Client: %s (%s)\n' "$name" "$ip" >&2
+        printf 'Current policy: %s\n\n' "$current_label" >&2
+    fi
     if ! arrow_menu policy; then
         unchanged 'No changes made.'
         return 1
@@ -2504,9 +2769,23 @@ undo_last_action() {
     [[ -r $HISTORY_FILE ]] || fail 'no rollback history is available'
     jq -e 'type == "array"' "$HISTORY_FILE" >/dev/null \
         || fail "rollback history is not a JSON array: $HISTORY_FILE"
-    index=$(jq -r --arg router "$ROUTER_URL" \
-        '[to_entries[] | select(.value.router == $router)] | last | .key // empty' "$HISTORY_FILE")
-    [[ -n $index ]] || fail "no rollback entry exists for $ROUTER_URL"
+    if $INTERACTIVE; then
+        jq -e --arg router "$ROUTER_URL" 'any(.[]; .router == $router)' "$HISTORY_FILE" >/dev/null \
+            || fail "no rollback entry exists for $ROUTER_URL"
+        MENU_CANCEL_MESSAGE='No change selected.'
+        pick_from_list 'Recorded changes, newest first (restore the state before the change):' 'Change' false 3< <(
+            jq -r --arg router "$ROUTER_URL" --slurpfile policies "$TMP_DIR/policies.json" \
+                "def policy_label: $policy_label_filter;"'
+                [to_entries[] | select(.value.router == $router)] | reverse[]
+                | [(.key | tostring), (.value.timestamp + "  " + .value.name + "  " + .value.action + ": "
+                    + (.value.after | policy_label) + " → restore " + (.value.before | policy_label))] | @tsv' "$HISTORY_FILE"
+        ) || return 0
+        index=$SELECTED_VALUE
+    else
+        index=$(jq -r --arg router "$ROUTER_URL" \
+            '[to_entries[] | select(.value.router == $router)] | last | .key // empty' "$HISTORY_FILE")
+        [[ -n $index ]] || fail "no rollback entry exists for $ROUTER_URL"
+    fi
     entry=$(jq -c --argjson index "$index" '.[$index]' "$HISTORY_FILE")
     mac=$(jq -r '.mac' <<< "$entry")
     name=$(jq -r '.name' <<< "$entry")
@@ -2638,9 +2917,16 @@ render_report() {
 }
 
 system_reboot() {
+    local answer
     if $DRY_RUN; then
         printf 'Would request an immediate reboot of %s.\n' "$ROUTER_URL"
         return
+    fi
+    # Ask in a terminal unless --yes or --quiet; scripts without a terminal proceed as before.
+    if ! $ASSUME_YES && ! $QUIET && [[ -t 0 && -t 2 ]]; then
+        printf 'Reboot %s now? Network access will be interrupted. [y/N]: ' "$ROUTER_URL" >&2
+        IFS= read -r answer || fail 'confirmation input ended unexpectedly'
+        [[ ${answer,,} == y || ${answer,,} == yes ]] || { unchanged 'No changes made.'; return 0; }
     fi
     # One request only: a lost response can mean the router is already rebooting.
     OPERATION_CONTEXT="reboot request to $ROUTER_URL; if the response is lost, the router may already be rebooting"
@@ -2754,6 +3040,15 @@ wifi_monitor_main() {
 clients_main() {
     start_router_session
     if [[ $SUBCOMMAND == rename ]]; then clients_rename; return; fi
+    if $INTERACTIVE; then
+        # Pick from the listing view (connected by default; --all/--offline widen it), then inspect.
+        fetch_router_state; detect_current_client
+        MENU_CANCEL_MESSAGE='No client selected.'
+        select_any_client || return 0
+        printf '\n'
+        inspect_client
+        return
+    fi
     if [[ $SUBCOMMAND != inspect ]]; then
         fetch_router_state; detect_current_client
         if $JSON_OUTPUT; then list_clients_json; else list_clients_table; fi
@@ -2761,13 +3056,19 @@ clients_main() {
     fi
     VIEW_MODE=all
     fetch_router_state
-    local matches count mac
+    local matches count
     matches=$(jq --arg query "$INSPECT_QUERY" '[.[] | select(.ip == $query or .mac == ($query | ascii_downcase)
         or (.name | ascii_downcase) == ($query | ascii_downcase))] | unique_by(.mac)' "$TMP_DIR/all-clients.json")
     count=$(jq 'length' <<< "$matches")
     ((count > 0)) || fail "$EXIT_CLIENT" "no client matches $INSPECT_QUERY. Names are matched exactly; try 'keenetic clients --all' to list known clients."
     ((count == 1)) || ambiguous_lookup "$matches" 'clients inspect SELECTOR'
     SELECTED_CLIENT=$(jq -c '.[0]' <<< "$matches")
+    inspect_client
+}
+
+# Render the detail view for SELECTED_CLIENT; fetch_router_state must already have run.
+inspect_client() {
+    local mac
     mac=$(jq -r '.mac' <<< "$SELECTED_CLIENT")
     read_optional_json '/rci/show/ip/hotspot/summary?detail=0&attribute=sumbytes' "$TMP_DIR/inspect-traffic.json" object 'Recent client traffic'
     read_optional_json /rci/show/interface "$TMP_DIR/inspect-interfaces.json" object 'Client radio details'
@@ -2804,8 +3105,42 @@ clients_main() {
             ["Traffic · 3 minutes",((.recent_traffic.rx_bytes | bytes) + " RX / " + (.recent_traffic.tx_bytes | bytes) + " TX")]])'
 }
 
+list_policies() {
+    jq --arg router "$ROUTER_URL" --slurpfile clients "$TMP_DIR/all-clients.json" '
+        . as $policies
+        | {router:$router, policies:(
+            [{id:null, name:"Default", interfaces:null,
+              clients:([$clients[0][] | select((.policy == null or .policy == false) and .deny != true)] | length)}]
+            + [to_entries[] | select(.value | type == "object") | .key as $id
+               | {id:$id, name:(.value.description // $id), interfaces:((.value.permit // []) | length),
+                  clients:([$clients[0][] | select(.policy == $id and .deny != true)] | length)}]
+            + [{id:null, name:"Blocked", interfaces:0, clients:([$clients[0][] | select(.deny == true)] | length)}])}
+    ' "$TMP_DIR/policies.json" > "$TMP_DIR/policy-list.json"
+    # shellcheck disable=SC2016 # Variables in the filter belong to jq.
+    render_report "$TMP_DIR/policy-list.json" '
+        grid("Connection policies"; ["NAME","ID","INTERFACES","CLIENTS"];
+            [.policies[] | [.name, (.id // "-"), (if .interfaces == null then "all global" else .interfaces end), .clients]]),
+        "", ($dim + "Use keenetic policy show NAME for interfaces and clients, or keenetic client assign CLIENT POLICY." + $reset)'
+}
+
 inspect_policy() {
-    resolve_policy "$INSPECT_QUERY"
+    local index
+    if [[ -z $INSPECT_QUERY ]]; then
+        load_policy_options
+        MENU_CANCEL_MESSAGE='No policy selected.'
+        pick_from_list 'Connection policies:' 'Policy' false 3< <(
+            for ((index = 0; index < ${#POLICY_IDS[@]}; index++)); do
+                [[ ${POLICY_IDS[index]} == __block__ ]] || printf '%s\t%s\n' "${POLICY_IDS[index]}" "${POLICY_LABELS[index]}"
+            done
+        ) || return 0
+        SELECTED_POLICY_ID=$SELECTED_VALUE
+        for ((index = 0; index < ${#POLICY_IDS[@]}; index++)); do
+            [[ ${POLICY_IDS[index]} != "$SELECTED_POLICY_ID" ]] || SELECTED_POLICY_LABEL=${POLICY_LABELS[index]}
+        done
+        printf '\n'
+    else
+        resolve_policy "$INSPECT_QUERY"
+    fi
     api_get /rci/show/interface "$TMP_DIR/policy-interfaces.json" 'policy interface status' object
     jq --arg router "$ROUTER_URL" --arg id "$SELECTED_POLICY_ID" --arg name "$SELECTED_POLICY_LABEL" \
         --slurpfile interfaces "$TMP_DIR/policy-interfaces.json" --slurpfile clients "$TMP_DIR/all-clients.json" '
@@ -2851,6 +3186,20 @@ fetch_logs() {
 logs_main() {
     start_router_session
     fetch_logs
+    if $INTERACTIVE && jq -e '.entries | length > 0' "$TMP_DIR/logs.json" >/dev/null; then
+        MENU_CANCEL_MESSAGE='No source selected.'
+        pick_from_list 'Log sources in the retrieved entries:' 'Source' false 3< <(
+            printf '__all__\tAll sources\n'
+            jq -r '[.entries[] | .source // "unknown"] | unique[] | [., .] | @tsv' "$TMP_DIR/logs.json"
+        ) || return 0
+        if [[ $SELECTED_VALUE != __all__ ]]; then
+            LOG_FILTER=$SELECTED_VALUE
+            jq --arg source "$LOG_FILTER" '.entries |= map(select((.source // "unknown") == $source))' \
+                "$TMP_DIR/logs.json" > "$TMP_DIR/logs-filtered.json"
+            mv "$TMP_DIR/logs-filtered.json" "$TMP_DIR/logs.json"
+        fi
+        printf '\n'
+    fi
     # shellcheck disable=SC2016 # Variables in the filter belong to jq.
     render_report "$TMP_DIR/logs.json" --arg filter "$LOG_FILTER" '
         grid("Router logs"; ["TIME","LEVEL","SOURCE","MESSAGE"];
@@ -2896,6 +3245,13 @@ run_diagnostic_test() {
 diagnose_main() {
     local payload ping=ping
     start_router_session
+    if $INTERACTIVE && [[ -z $DIAG_INTERFACE ]]; then
+        VIEW_MODE=all
+        fetch_interface_status
+        MENU_CANCEL_MESSAGE='No interface selected.'
+        pick_from_list "Source interface for router-side tests to $DIAG_HOST:" 'Interface' false 3< <(interface_menu_rows) || return 0
+        [[ $SELECTED_VALUE == __default__ ]] || DIAG_INTERFACE=$SELECTED_VALUE
+    fi
     if [[ -n $DIAG_INTERFACE ]]; then
         VIEW_MODE=all
         fetch_interface_status
@@ -3112,6 +3468,16 @@ wifi_clients_main() {
 wifi_scan_main() {
     local id payload
     get_view /rci/show/interface "$TMP_DIR/scan-interfaces.json" 'Wi-Fi radios'
+    if $INTERACTIVE && [[ -z $SCAN_RADIO ]]; then
+        MENU_CANCEL_MESSAGE='No radio selected.'
+        pick_from_list 'Radio to survey:' 'Radio' false 3< <(
+            printf '__all__\tAll enabled radios\n'
+            jq -r 'to_entries[] | .key as $key | .value | select(.type == "WifiMaster")
+                | [(.id // $key), ((.id // $key) + "  channel " + ((.channel // "-") | tostring) + "  " + (.state // "unknown"))] | @tsv' \
+                "$TMP_DIR/scan-interfaces.json"
+        ) || return 0
+        [[ $SELECTED_VALUE == __all__ ]] || SCAN_RADIO=$SELECTED_VALUE
+    fi
     # shellcheck disable=SC2016 # Variables in the filter belong to jq.
     normalize_data "$TMP_DIR/scan-interfaces.json" "$TMP_DIR/scan-radios.json" '
         if type != "object" or any(.[]; type != "object") then error("invalid radios") else . end
@@ -3157,8 +3523,16 @@ select_report_client() {
 connections_main() {
     local client_ip=
     start_router_session
-    if [[ -n $INSPECT_QUERY ]]; then
+    if $INTERACTIVE; then
+        VIEW_MODE=all
+        fetch_router_state; detect_current_client
+        MENU_CANCEL_MESSAGE='No client selected.'
+        select_any_client || return 0
+        printf '\n'
+    elif [[ -n $INSPECT_QUERY ]]; then
         select_report_client
+    fi
+    if [[ -n $SELECTED_CLIENT ]]; then
         client_ip=$(jq -r '.ip' <<< "$SELECTED_CLIENT")
         [[ $client_ip != N/A && $client_ip != null && -n $client_ip ]] || fail "$EXIT_CLIENT" 'the client has no known IP address'
     fi
@@ -3250,7 +3624,16 @@ system_save() {
 
 clients_rename() {
     local mac payload attempt
-    select_report_client
+    if $INTERACTIVE; then
+        VIEW_MODE=all
+        fetch_router_state; detect_current_client
+        MENU_CANCEL_MESSAGE='No client selected.'
+        select_any_client || return 0
+        NEW_CLIENT_NAME=$(prompt_value 'New name' "$(jq -r '.name' <<< "$SELECTED_CLIENT")")
+        validate_client_name "$NEW_CLIENT_NAME"
+    else
+        select_report_client
+    fi
     mac=$(jq -r '.mac' <<< "$SELECTED_CLIENT")
     [[ $mac =~ ^([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}$ ]] || fail "$EXIT_CLIENT" 'selected client has an invalid MAC address'
     if $DRY_RUN; then printf 'Would rename client %s to %s on %s.\n' "$mac" "$NEW_CLIENT_NAME" "$ROUTER_URL"; return; fi
@@ -3274,6 +3657,25 @@ clients_rename() {
 speedtest_main() {
     local payload
     start_router_session
+    if $INTERACTIVE; then
+        if [[ -z $SPEED_SERVER ]]; then
+            VIEW_MODE=all
+            fetch_router_state
+            MENU_CANCEL_MESSAGE='No server selected.'
+            pick_from_list 'iPerf3 server (a known client running iperf3 -s):' 'Server' false 3< <(
+                jq -r 'sort_by(if .online then 0 else 1 end, (.name | ascii_downcase))[] | select(.ip != "N/A" and .ip != null)
+                    | [.ip, (.name + "  " + .ip + "  " + (if .online then "online" else "offline" end))] | @tsv' "$TMP_DIR/all-clients.json"
+            ) || return 0
+            SPEED_SERVER=$SELECTED_VALUE
+        fi
+        if [[ -z $DIAG_INTERFACE ]]; then
+            VIEW_MODE=all
+            fetch_interface_status
+            MENU_CANCEL_MESSAGE='No interface selected.'
+            pick_from_list "Source interface for the test to $SPEED_SERVER:" 'Interface' false 3< <(interface_menu_rows) || return 0
+            [[ $SELECTED_VALUE == __default__ ]] || DIAG_INTERFACE=$SELECTED_VALUE
+        fi
+    fi
     if [[ -n $DIAG_INTERFACE ]]; then
         VIEW_MODE=all
         fetch_interface_status
@@ -3321,7 +3723,7 @@ select_interface_interactively() {
         selected=$(list_interface_status false true \
             | "$FZF_COMMAND" --delimiter=$'\t' --with-nth=2.. --height=70% --layout=reverse \
                 --prompt='Interface> ' --header='Select interface (including inactive interfaces)'$'\n'"$(list_interface_status false true true)") || {
-            unchanged 'No changes made.'
+            unchanged "$MENU_CANCEL_MESSAGE"
             return 1
         }
         selected_index=${selected%%$'\t'*}
@@ -3334,7 +3736,7 @@ select_interface_interactively() {
         mapfile -t MENU_OPTIONS < <(list_interface_status false true | cut -f2-)
         printf 'Select interface (including inactive interfaces)\n\n' >&2
         if ! arrow_menu interface; then
-            unchanged 'No changes made.'
+            unchanged "$MENU_CANCEL_MESSAGE"
             return 1
         fi
         selected_index=$((SELECTED_INDEX - 1))
@@ -3346,7 +3748,7 @@ choose_interface_action() {
     local heading selected
     heading=$(jq -r '"Interface: " + .id + " | Status: " + .status | gsub("[[:cntrl:]]"; " ")' <<< "$SELECTED_INTERFACE")
     if command -v "$FZF_COMMAND" >/dev/null 2>&1; then
-        selected=$(printf 'up\tConnect (enable)\ndown\tDisconnect (disable)\ncancel\tCancel\n' \
+        selected=$(printf 'up\tConnect (enable)\ndown\tDisconnect (disable)\ninspect\tInspect (show details)\ncancel\tCancel\n' \
             | "$FZF_COMMAND" --delimiter=$'\t' --with-nth=2.. --height=70% --layout=reverse \
                 --prompt='Action> ' --header="$heading") || {
             unchanged 'No changes made.'
@@ -3356,7 +3758,7 @@ choose_interface_action() {
     else
         MENU_KIND=interface-action
         MENU_CURRENT_INDEX=-1
-        MENU_OPTIONS=('Connect (enable)' 'Disconnect (disable)' 'Cancel')
+        MENU_OPTIONS=('Connect (enable)' 'Disconnect (disable)' 'Inspect (show details)' 'Cancel')
         printf '%s\n\n' "$heading" >&2
         if ! arrow_menu action; then
             unchanged 'No changes made.'
@@ -3365,11 +3767,12 @@ choose_interface_action() {
         case $SELECTED_INDEX in
             1) SELECTED_INTERFACE_ACTION=up ;;
             2) SELECTED_INTERFACE_ACTION=down ;;
-            3) SELECTED_INTERFACE_ACTION=cancel ;;
+            3) SELECTED_INTERFACE_ACTION=inspect ;;
+            4) SELECTED_INTERFACE_ACTION=cancel ;;
         esac
     fi
     case $SELECTED_INTERFACE_ACTION in
-        up|down) ;;
+        up|down|inspect) ;;
         cancel) unchanged 'No changes made.'; return 1 ;;
         *) fail 'fzf returned an unknown interface action' ;;
     esac
@@ -3505,7 +3908,26 @@ interfaces_main() {
         VIEW_MODE=all
     fi
     start_router_session
-    if [[ $SUBCOMMAND == inspect ]]; then interface_inspect; return; fi
+    if [[ $SUBCOMMAND == up || $SUBCOMMAND == down ]]; then
+        VIEW_MODE=all
+        fetch_interface_status
+        SELECTED_INTERFACE=$(jq -c --arg id "$INSPECT_QUERY" 'first(.interfaces[] | select(.id == $id)) // empty' "$TMP_DIR/status.json")
+        [[ -n $SELECTED_INTERFACE ]] || fail "$EXIT_USAGE" "unknown interface ID: $INSPECT_QUERY. Run 'keenetic interface list --all' to see IDs."
+        SELECTED_INTERFACE_ACTION=$SUBCOMMAND
+        apply_interface_action
+        return
+    fi
+    if [[ $SUBCOMMAND == inspect ]]; then
+        if $INTERACTIVE && [[ -z $INSPECT_QUERY ]]; then
+            fetch_interface_status
+            fetch_interface_traffic
+            MENU_CANCEL_MESSAGE='No interface selected.'
+            select_interface_interactively || return 0
+            INSPECT_QUERY=$(jq -r '.id' <<< "$SELECTED_INTERFACE")
+            printf '\n'
+        fi
+        interface_inspect; return
+    fi
     if $INTERFACE_RATES; then interface_rates; return; fi
     fetch_interface_status
     fetch_interface_traffic
@@ -3514,7 +3936,13 @@ interfaces_main() {
     elif $INTERACTIVE; then
         select_interface_interactively || return 0
         choose_interface_action || return 0
-        apply_interface_action
+        if [[ $SELECTED_INTERFACE_ACTION == inspect ]]; then
+            INSPECT_QUERY=$(jq -r '.id' <<< "$SELECTED_INTERFACE")
+            printf '\n'
+            interface_inspect
+        else
+            apply_interface_action
+        fi
     else
         list_interface_status false
     fi
@@ -3542,51 +3970,39 @@ traffic_main() {
 }
 
 policy_main() {
-    local answer
     start_router_session
     fetch_router_state
     detect_current_client
 
-    if [[ $SUBCOMMAND == inspect ]]; then
+    if [[ $SUBCOMMAND == list ]]; then
+        list_policies
+    elif [[ $SUBCOMMAND == inspect ]]; then
         inspect_policy
     elif $UNDO; then
         undo_last_action
     elif $JSON_OUTPUT; then
         list_clients_json
     elif $INTERACTIVE; then
-        select_any_client || return 0
-        choose_policy_interactively "$SELECTED_CLIENT" || return 0
+        select_any_client true || return 0
+        choose_policy_interactively "$SELECTED_CLIENT" "${#SELECTED_CLIENTS[@]}" || return 0
         if [[ $SELECTED_POLICY_ID == __block__ ]]; then
             ACTION=block
-            if ! $DRY_RUN && [[ $(client_policy_id "$SELECTED_CLIENT") != __block__ ]]; then
-                printf 'Block Internet access for %s? [y/N]: ' "$(jq -r '.name' <<< "$SELECTED_CLIENT")" >&2
-                IFS= read -r answer || fail 'confirmation input ended unexpectedly'
-                [[ ${answer,,} == y || ${answer,,} == yes ]] || {
-                    unchanged 'No changes made.'
-                    return 0
-                }
-            fi
+            confirm_block_interactively || return 0
         else
             ACTION=policy
         fi
-        apply_client_action "$SELECTED_CLIENT" "$ACTION"
+        run_selected_actions
     elif [[ -n $ACTION ]]; then
         [[ $ACTION != policy ]] || resolve_policy "$POLICY_QUERY"
         preflight_clients
         run_selected_actions
     elif ((${#CLIENT_SELECTORS[@]} == 1)); then
         resolve_client "${CLIENT_SELECTORS[0]}" "${CLIENT_VALUES[0]}" true || return 0
+        SELECTED_CLIENTS=("$SELECTED_CLIENT")
         choose_policy_interactively "$SELECTED_CLIENT" || return 0
         if [[ $SELECTED_POLICY_ID == __block__ ]]; then
             ACTION=block
-            if ! $DRY_RUN && [[ $(client_policy_id "$SELECTED_CLIENT") != __block__ ]]; then
-                printf 'Block Internet access for %s? [y/N]: ' "$(jq -r '.name' <<< "$SELECTED_CLIENT")" >&2
-                IFS= read -r answer || fail 'confirmation input ended unexpectedly'
-                [[ ${answer,,} == y || ${answer,,} == yes ]] || {
-                    unchanged 'No changes made.'
-                    return 0
-                }
-            fi
+            confirm_block_interactively || return 0
         else
             ACTION=policy
         fi
@@ -3598,15 +4014,55 @@ policy_main() {
 
 wake_main() {
     start_router_session
-    fetch_router_state
-    preflight_clients
+    if $INTERACTIVE; then
+        VIEW_MODE=all
+        fetch_router_state; detect_current_client
+        MENU_CANCEL_MESSAGE='No client selected.'
+        select_any_client true || return 0
+    else
+        fetch_router_state
+        preflight_clients
+    fi
     run_selected_actions
+}
+
+# `keenetic --interactive`: pick a command, then run it (interactively where that exists).
+command_menu() {
+    start_router_session
+    MENU_CANCEL_MESSAGE='No command selected.'
+    pick_from_list "Router $ROUTER_URL" 'Command' false 3< <(printf '%s\n' \
+        $'status\tRouter status: KeenDNS, clients, interfaces, traffic totals' \
+        $'interfaces\tInterfaces: pick one to inspect, connect, or disconnect' \
+        $'clients\tClients: pick one to inspect' \
+        $'policy\tPolicies: pick clients, then assign a policy or block Internet' \
+        $'wake\tWake-on-LAN: pick clients to wake' \
+        $'connections\tActive NAT connections for a chosen client' \
+        $'logs\tRecent logs, filtered by a chosen source' \
+        $'wifi\tWi-Fi networks' \
+        $'traffic\tTop clients by recent traffic' \
+        $'wan\tInternet health, connections, and DNS' \
+        $'dhcp\tDHCP leases and reservations' \
+        $'routes\tRouting table' \
+        $'mesh\tMesh nodes' \
+        $'forwards\tPort-forwarding rules' \
+        $'vpn\tWireGuard peers' \
+        $'system\tRouter health') || return 0
+    printf '\n'
+    case $SELECTED_VALUE in
+        status) COMMAND=root; INTERACTIVE=false; status_main ;;
+        interfaces|clients|policy|wake|connections|logs)
+            COMMAND=$SELECTED_VALUE
+            [[ $SELECTED_VALUE != wake ]] || ACTION=wake
+            run_command_once ;;
+        vpn) COMMAND=vpn; SUBCOMMAND=peers; INTERACTIVE=false; run_command_once ;;
+        *) COMMAND=$SELECTED_VALUE; INTERACTIVE=false; run_command_once ;;
+    esac
 }
 
 run_command_once() {
     case $COMMAND in
         root)
-            if $INIT_CONFIG || $DISCOVER; then setup_main; else status_main; fi
+            if $INIT_CONFIG || $DISCOVER; then setup_main; elif $INTERACTIVE; then command_menu; else status_main; fi
             ;;
         policy) policy_main ;;
         interfaces) interfaces_main ;;

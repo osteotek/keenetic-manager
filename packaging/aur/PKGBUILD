@@ -1,6 +1,6 @@
 # Maintainer: osteotek
 pkgname=keenetic-manager
-pkgver=1.3.1
+pkgver=1.4.0
 pkgrel=1
 pkgdesc='CLI for Keenetic router status, diagnostics, and client policies'
 arch=('any')
@@ -9,7 +9,7 @@ license=('MIT')
 depends=('bash' 'curl' 'jq' 'coreutils')
 optdepends=('fzf: searchable interactive menus')
 source=("$pkgname-$pkgver.tar.gz::$url/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz")
-sha256sums=('f914cbfe780451905213145db2936a7db9226c96b7499af0b5fd60e2313ac34b')
+sha256sums=('2e7a78c40ab27f44e1e1cbe31f196d0ecf9620d60209fd96b6ec94bfd93787fb')
 
 package() {
     cd "$srcdir/$pkgname-$pkgver"

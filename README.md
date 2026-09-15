@@ -12,7 +12,7 @@ A Bash CLI for Keenetic routers. Inspect status, clients, Wi-Fi, traffic, and VP
 - **Traffic ranking.** Top clients by received and sent bytes over the router's 3-minute, 1-hour, 3-hour, or 1-day Traffic Monitor windows.
 - **Network state.** WAN health and DNS servers, DHCP leases and reservations, IPv4/IPv6 routing table, mesh members and backhaul, live NAT connections, and port-forwarding rules.
 - **Clients.** List online and offline clients, inspect connection, policy, and traffic details, and rename devices.
-- **Connection policies.** Assign clients to policies with `policy set CLIENT POLICY`, block or unblock Internet access, batch changes with dry runs, undo verified changes, and inspect policy interface order.
+- **Connection policies.** Assign clients to policies with `policy assign CLIENT POLICY`, block or unblock Internet access, batch changes with dry runs, undo verified changes, and inspect policy interface order.
 - **VPN.** WireGuard peers with endpoints, handshake age, counters, and status.
 - **System.** Model, firmware, uptime, CPU, memory, and connection-table usage; pending configuration changes; save configuration; reboot.
 - **Diagnostics.** Router-side ping and traceroute, iPerf3 throughput tests, and recent logs with filtering.
@@ -40,7 +40,7 @@ Install from a checkout and create a configuration:
 git clone https://github.com/osteotek/keenetic-manager.git
 cd keenetic-manager
 make install
-keenetic --init
+keenetic config init
 ```
 
 The default installation path is `~/.local/bin/keenetic`. Ensure it is in `PATH`. Bash completion installs to `~/.local/share/bash-completion/completions/` and zsh completion to `~/.local/share/zsh/site-functions/`; add that directory to `fpath` before `compinit` if it is not already there. `make uninstall` removes the executable and both completions.
@@ -51,7 +51,7 @@ Then try:
 
 ```bash
 keenetic                 # router status
-keenetic clients         # connected clients
+keenetic client list         # connected clients
 keenetic wifi            # Wi-Fi networks
 keenetic traffic         # top clients by traffic
 keenetic --help          # command overview
@@ -61,29 +61,49 @@ Mistyped commands get a suggestion, for example `keenetic clinets` answers with 
 
 ## Command overview
 
-| Command | Purpose |
-|---|---|
-| `keenetic` | [Router status](#router-status): KeenDNS, client counts, interfaces, traffic totals |
-| `keenetic interfaces` | [Interfaces](#interfaces): list, `inspect ID`, `--rates`, or `--interactive` connect/disconnect |
-| `keenetic wifi` | [Wi-Fi](#wi-fi): networks, `clients`, `scan`, `monitor` |
-| `keenetic traffic` | [Traffic](#traffic): rank clients by recent traffic |
-| `keenetic wan` | [WAN health](#wan-health): Internet reachability, gateways, DNS |
-| `keenetic dhcp` | [DHCP leases](#dhcp-leases) and reservations |
-| `keenetic routes` | [Routing table](#routing-table) |
-| `keenetic mesh` | [Mesh topology](#mesh-topology) |
-| `keenetic connections` | [Active NAT connections](#active-connections-and-port-forwarding), optionally per client |
-| `keenetic forwards` | [Port-forwarding rules](#active-connections-and-port-forwarding) |
-| `keenetic clients` | [Clients](#clients-and-connection-policies): list, `inspect`, `rename` |
-| `keenetic policy` | [Connection policies](#clients-and-connection-policies): list, `set`, `block`, `unblock`, `--undo`, `inspect` |
-| `keenetic wake` | [Wake-on-LAN](#wake-on-lan) |
-| `keenetic system` | [System health](#system-health), `changes`, `save`, `reboot` |
-| `keenetic vpn peers` | [VPN peers](#vpn-peers): WireGuard status |
-| `keenetic logs` | [Logs](#logs-and-diagnostics): recent router log lines |
-| `keenetic diagnose HOST` | [Diagnostics](#logs-and-diagnostics): router-side ping and traceroute |
-| `keenetic speedtest` | [Throughput test](#router-throughput-test) with iPerf3 |
-| `keenetic --init` / `--discover` | [Configuration](#configuration) and router discovery |
+Commands name a resource and take a verb; the first verb is the default, so `keenetic client` equals `keenetic client list`. Targets are client names, IP addresses, or MAC addresses, interface IDs, or policy names or IDs.
+
+| Command | Verbs | Purpose |
+|---|---|---|
+| `keenetic` / `keenetic status` | | [Router status](#router-status): KeenDNS, client counts, interfaces, traffic totals |
+| `keenetic client` | `list`, `show`, `rename`, `wake`, `block`, `unblock`, `assign`, `nat` | [Clients](#client-details): details, [Wake-on-LAN](#wake-on-lan), [Internet blocks and policies](#clients-and-connection-policies), [NAT connections](#active-connections-and-port-forwarding) |
+| `keenetic policy` | `list`, `show`, `assign`, `block`, `unblock`, `undo` | [Connection policies](#clients-and-connection-policies) and the clients that use them |
+| `keenetic interface` | `list`, `show`, `rates`, `up`, `down` | [Interfaces](#interfaces): status, details, live rates, [enable or disable](#interface-control) |
+| `keenetic wifi` | `list`, `clients`, `scan`, `load` | [Wi-Fi](#wi-fi): networks, stations, nearby survey, channel load |
+| `keenetic vpn peers` | | [WireGuard peers](#vpn-peers) |
+| `keenetic traffic` | | [Traffic](#traffic): rank clients by recent traffic |
+| `keenetic wan`, `dhcp`, `routes`, `mesh`, `nat`, `forwards` | | [WAN health](#wan-health), [DHCP leases](#dhcp-leases), [Routing table](#routing-table), [Mesh topology](#mesh-topology), [NAT and port forwarding](#active-connections-and-port-forwarding) |
+| `keenetic system` | `show`, `changes`, `save`, `reboot` | [System health](#system-health), [configuration persistence](#client-names-and-configuration-persistence), [reboot](#reboot) |
+| `keenetic logs` | | [Logs](#logs-and-diagnostics): recent router log lines |
+| `keenetic diagnose HOST` | | [Diagnostics](#logs-and-diagnostics): router-side ping and traceroute |
+| `keenetic speedtest` | | [Throughput test](#router-throughput-test) with iPerf3 |
+| `keenetic config` | `init`, `discover` | [Configuration](#configuration) and router discovery |
 
 Add `--json` to any read-only view for machine-readable output and `--watch SECONDS` to refresh it in place. See [Live views](#live-views) and [Global options](#global-options).
+
+Earlier spellings keep working: `clients inspect X` is `client show X`, `policy set` is `policy assign`, `interfaces --rates` is `interface rates`, `wifi monitor` is `wifi load`, `connections` is `nat`, `wake` is `client wake`, `--init` and `--discover` are `config init` and `config discover`, and the flag form `policy --client X --policy Y` still applies policies. One change in meaning: bare `keenetic policy` now lists policies; use `keenetic client list` for clients.
+
+### Interactive pickers
+
+`-i` / `--interactive` replaces typed names and IDs with a picker: searchable with fzf when installed, arrow keys otherwise. Where a command can act on several targets, fzf's Tab or the arrow menu's Space marks more than one.
+
+| Command | What the picker does |
+|---|---|
+| `keenetic -i` | Menu of commands; runs the chosen one, interactively where that exists |
+| `policy -i` | Pick one or more clients, then a policy or Block Internet for all of them |
+| `policy undo -i` | Pick which recorded change to restore instead of the newest |
+| `policy show -i` | Pick a policy to inspect |
+| `client wake -i` | Pick one or more known clients, including offline ones |
+| `client -i`, `client show -i` | Pick a client to inspect |
+| `client rename -i` | Pick a client, then type the new name |
+| `interface -i` | Pick an interface, then Connect, Disconnect, or Inspect |
+| `interface show -i` | Pick an interface to inspect |
+| `nat -i` | Pick the client whose NAT connections to show |
+| `logs -i` | Pick a log source from the retrieved entries |
+| `wifi scan -i` | Pick the radio to survey |
+| `diagnose HOST -i`, `speedtest -i` | Pick the source interface; `speedtest` also picks the server from known clients |
+
+Cancelling any picker leaves the router unchanged. `--dry-run` works with the pickers that perform actions.
 
 Text output colors status words when writing to a terminal: green for online, connected, or passing states, yellow for offline, disconnected, or not-ready states, red for errors and blocks, and dim for unknown values. Detail views fold fields the router did not report into a single dim `Not reported:` line so real data stands out; JSON keeps every field with `null` values. Colors follow `--color`, `--no-color`, and `NO_COLOR`.
 
@@ -92,7 +112,7 @@ Text output colors status words when writing to a terminal: green for online, co
 Create and test the default configuration interactively:
 
 ```bash
-keenetic --init
+keenetic config init
 ```
 
 The prompts ask for the router URL, username, and password. Leave the password blank to store a password file path or a password command instead. HTTPS URLs then ask for a trusted CA file.
@@ -137,7 +157,7 @@ Select one with:
 
 ```bash
 keenetic --router home policy --json
-keenetic --router office --init
+keenetic config init --router office
 ```
 
 `--router` cannot be combined with `KEENETIC_CONFIG`.
@@ -147,7 +167,7 @@ keenetic --router office --init
 To probe only the active default gateway for a compatible `/auth` endpoint, without scanning the subnet:
 
 ```bash
-keenetic --discover
+keenetic config discover
 ```
 
 ### HTTPS trust
@@ -173,8 +193,8 @@ keenetic --ca-file router-ca.pem policy --json
 ```bash
 keenetic --router home policy --json
 keenetic policy --router home --json
-keenetic --verbose wake --client Desktop
-keenetic wake --help
+keenetic --verbose client wake --client Desktop
+keenetic client wake --help
 ```
 
 `--help` shows help for the selected subcommand even when placed before it. Client selectors, listing filters, actions, and `--dry-run` follow their subcommand.
@@ -214,7 +234,7 @@ By default, only connected interfaces and ports with an active link are shown. U
 
 Status reflects the router's administrative and connection/link state, not an end-to-end Internet or VPN reachability test. The command reads `/rci/show/interface` and `/rci/show/ndns` after authentication, then sends a batch of read-only `show interface NAME stat` queries to `/rci/`. It makes no configuration changes.
 
-`keenetic --json` returns an object with `router` and `interfaces`. Each interface includes `id`, `description`, `type`, `vpn`, `status`, `state`, `link`, `connected` (boolean or null when unknown), `ipv4`, `mask`, and an `ipv6` array of `{address, prefix_length}` objects. IPv4 and mask are null when absent. Use `keenetic policy --json` for client output.
+`keenetic --json` returns an object with `router` and `interfaces`. Each interface includes `id`, `description`, `type`, `vpn`, `status`, `state`, `link`, `connected` (boolean or null when unknown), `ipv4`, `mask`, and an `ipv6` array of `{address, prefix_length}` objects. IPv4 and mask are null when absent. Use `keenetic client list --json` for client output.
 
 The top-level `keendns` object contains `hostname` and `access`; it is null if unavailable, with a null hostname when unconfigured. Each interface's `traffic` object contains `rx_bytes`, `tx_bytes`, `rx_packets`, `tx_packets`, `rx_errors`, `tx_errors`, `rx_dropped`, and `tx_dropped`. Missing counters are null, and an unavailable statistics response produces `traffic: null` plus a warning while preserving the interface listing.
 
@@ -227,10 +247,10 @@ Traffic values are cumulative counters reported by the router, not live rates or
 Show the same interface tables as `keenetic`, including VPN/proxy grouping, status, IP addresses, and RX/TX totals:
 
 ```bash
-keenetic interfaces
-keenetic interfaces --all
-keenetic interfaces --json
-keenetic interfaces --all --json
+keenetic interface list
+keenetic interface list --all
+keenetic interface list --json
+keenetic interface list --all --json
 ```
 
 The default list hides inactive interfaces; `--all` includes them. This command omits the router summary and only fetches interface data and traffic counters. JSON contains `router` and `interfaces`, using the same interface fields as the default status command.
@@ -238,11 +258,11 @@ The default list hides inactive interfaces; `--all` includes them. This command 
 Inspect one interface or sample live rates:
 
 ```bash
-keenetic interfaces inspect GigabitEthernet1
-keenetic interfaces inspect Wireguard0 --json
-keenetic interfaces --rates
-keenetic interfaces --rates --sample 2 --watch 2
-keenetic interfaces --rates --all --json
+keenetic interface show GigabitEthernet1
+keenetic interface show Wireguard0 --json
+keenetic interface rates
+keenetic interface rates --sample 2 --watch 2
+keenetic interface rates --all --json
 ```
 
 Inspection includes inactive interfaces and requires an exact interface ID. It adds MAC, MTU, priority, default gateways, uptime, Ethernet speed/duplex and physical port details where reported, plus packet/error/drop counters. Missing values remain unknown. IPv6 gateway data is optional; an unsupported IPv6 endpoint does not discard IPv4 results.
@@ -281,14 +301,14 @@ keenetic wifi scan --radio WifiMaster1 --json
 
 `wifi clients` lists associated stations with access point, RSSI, TX link rate, Wi-Fi standard, channel width, and spatial streams. JSON adds RX link rate when available, MCS, security, authentication state, connection uptime, and byte counters. Device names/IPs are supplementary; unavailable inventory does not discard station telemetry.
 
-`wifi scan` surveys nearby networks and shows SSID, BSSID, radio, channel, signal, and security. Hidden SSIDs are retained. It surveys enabled radios by default; `--all` includes disabled radios, and `--radio ID` selects one exact radio. A scan may briefly affect Wi-Fi traffic, and `--watch` is unavailable for scans. Survey responses are whitelisted and exclude keys/passwords.
+`wifi scan` surveys nearby networks and shows SSID, BSSID, radio, channel, signal, and security. Hidden SSIDs are retained. It surveys enabled radios by default; `--all` includes disabled radios, `--radio ID` selects one exact radio, and `--interactive` picks the radio from a list. A scan may briefly affect Wi-Fi traffic, and `--watch` is unavailable for scans. Survey responses are whitelisted and exclude keys/passwords.
 
 #### Wi-Fi channel utilization
 
 ```bash
-keenetic wifi monitor
-keenetic wifi monitor --all --watch 3
-keenetic wifi monitor --json
+keenetic wifi load
+keenetic wifi load --all --watch 3
+keenetic wifi load --json
 ```
 
 Shows current, average, and peak channel utilization for each radio, plus channel, width, and state. The window contains available samples from the last 180 seconds relative to the newest router sample; JSON includes the sample count. Missing samples display as unknown. `--all` includes disabled radios. This reports channel load, rather than scanning neighboring SSIDs.
@@ -361,28 +381,31 @@ Shows mesh members, IP addresses, client counts, backhaul uplinks, parent bridge
 ### Active connections and port forwarding
 
 ```bash
-keenetic connections
-keenetic connections --client Laptop --watch 2
-keenetic connections --client 192.168.1.10 --json
+keenetic nat
+keenetic client nat Laptop --watch 2
+keenetic client nat 192.168.1.10 --json
 keenetic forwards
 keenetic forwards --json
 ```
 
-`connections` shows the router's live NAT table, with source/destination addresses and ports, protocol, and directional counters. The optional client selector searches known clients by name, IP, or MAC, including offline clients; ambiguous names require an IP or MAC. Filtering matches original and translated addresses in both directions. JSON preserves translated addresses/ports and packet counters. The NAT table is not a complete list of every LAN or IPv6 connection.
+`connections` shows the router's live NAT table, with source/destination addresses and ports, protocol, and directional counters. The optional client selector searches known clients by name, IP, or MAC, including offline clients; ambiguous names require an IP or MAC. `--interactive` picks the client from a list instead. Filtering matches original and translated addresses in both directions. JSON preserves translated addresses/ports and packet counters. The NAT table is not a complete list of every LAN or IPv6 connection.
 
 `forwards` lists configured static forwarding rules, including external port ranges, target host/port, interface, protocol, comment, and enabled state. These are configured rules, independent of whether a corresponding live NAT connection exists.
 
 ### Client details
 
 ```bash
-keenetic clients
-keenetic clients --all --json
-keenetic clients inspect Laptop
-keenetic clients inspect 192.168.1.10 --json
-keenetic clients inspect aa:bb:cc:dd:ee:ff
+keenetic client list
+keenetic client list --all --json
+keenetic client show Laptop
+keenetic client show 192.168.1.10 --json
+keenetic client show aa:bb:cc:dd:ee:ff
+keenetic client --interactive
+keenetic client -i --all
+keenetic client rename --interactive
 ```
 
-`clients` uses the same listing as `policy`. Inspection searches online and offline clients by case-insensitive name, exact IP, or MAC. Ambiguous names require an IP or MAC. Details include policy/block state, connection type, access point, SSID, band/channel, signal, reported RX/TX link rates, connection uptime, and stored traffic over three minutes. Missing optional data is `unknown` in text and null in JSON; unsupported traffic history does not discard the client details. Link rates are Mbps and memory/traffic byte totals use binary display units.
+`clients` uses the same listing as `policy`. `--interactive` opens the same client picker as `policy --interactive`, searchable with fzf when installed, and shows the chosen client's details; `--all` and `--offline` widen the pick list, and cancelling prints `No client selected.` without contacting the router again. `client rename --interactive` picks the client and then prompts for the new name, with the current name as the default. Inspection searches online and offline clients by case-insensitive name, exact IP, or MAC. Ambiguous names require an IP or MAC. Details include policy/block state, connection type, access point, SSID, band/channel, signal, reported RX/TX link rates, connection uptime, and stored traffic over three minutes. Missing optional data is `unknown` in text and null in JSON; unsupported traffic history does not discard the client details. Link rates are Mbps and memory/traffic byte totals use binary display units.
 
 ### System health
 
@@ -414,9 +437,9 @@ keenetic diagnose example.com
 keenetic diagnose 1.1.1.1 --interface Wireguard0 --json
 ```
 
-Logs retrieve a bounded recent snapshot (20 lines by default, maximum 1000). `--filter` applies a case-insensitive literal match to message/source after retrieving that snapshot; it does not search the router's full history. Text rows abbreviate long messages; JSON preserves them.
+Logs retrieve a bounded recent snapshot (20 lines by default, maximum 1000). `--filter` applies a case-insensitive literal match to message/source after retrieving that snapshot; it does not search the router's full history. `--interactive` lists the sources present in that snapshot and keeps only the chosen one. Text rows abbreviate long messages; JSON preserves them.
 
-`diagnose HOST` runs ping and traceroute **from the router**, optionally through an existing interface, then includes relevant entries from the latest 20 log lines. Ping sends four probes; traceroute uses at most 12 hops, one probe per hop, and a one-second probe wait. IPv6 literals select `ping6`. Each tool has a 60-second polling limit; interruption or a polling failure cancels the active router tool. `completed` in JSON means the tool finished: inspect its output for packet loss and routing failures. Logs are supplementary and can be unavailable without discarding probe output.
+`diagnose HOST` runs ping and traceroute **from the router**, optionally through an existing interface (`--interface ID`, or `--interactive` to pick one), then includes relevant entries from the latest 20 log lines. Ping sends four probes; traceroute uses at most 12 hops, one probe per hop, and a one-second probe wait. IPv6 literals select `ping6`. Each tool has a 60-second polling limit; interruption or a polling failure cancels the active router tool. `completed` in JSON means the tool finished: inspect its output for packet loss and routing failures. Logs are supplementary and can be unavailable without discarding probe output.
 
 These features use the router's RCI system, interface, channel-utilization, log, and diagnostic endpoints. Their availability depends on firmware/components. See the [Keenetic CLI reference](https://storage.googleapis.com/docs.help.keenetic.com/cli/4.1/en/cli_manual_kn-2410.pdf) and [RCI diagnostic request/poll/cancel implementation](https://github.com/hexqnt/keenetic-rci/blob/master/src/client.rs). They do not save or restore router configuration.
 
@@ -429,7 +452,7 @@ keenetic speedtest --server example.net --port 5202 --interface Wireguard0 --jso
 keenetic speedtest --server 192.168.1.10 --dry-run
 ```
 
-The target must run an iPerf3 server. This tests TCP throughput from the router to the chosen server; `--reverse` measures server-to-router download. Defaults are port 5201 and ten seconds, with a duration range of 1–30 seconds. IPv6 literals select IPv6. `--interface` selects an existing router interface, while `--dry-run` previews the request without starting traffic. No public test server is selected automatically.
+The target must run an iPerf3 server. `--interactive` picks the server from known clients and the source interface from a list. This tests TCP throughput from the router to the chosen server; `--reverse` measures server-to-router download. Defaults are port 5201 and ten seconds, with a duration range of 1–30 seconds. IPv6 literals select IPv6. `--interface` selects an existing router interface, while `--dry-run` previews the request without starting traffic. No public test server is selected automatically.
 
 The command polls the router's iPerf3 tool and cancels it on interruption or polling failure, using the same bounded lifecycle as `diagnose`. It cannot be watched. JSON includes server, direction, duration, and the tool's output lines. `completed` means the tool finished; examine the output for throughput results or errors.
 
@@ -439,13 +462,13 @@ Add `--watch SECONDS` to a read-only view to refresh it in place:
 
 ```bash
 keenetic --watch 2
-keenetic interfaces --all --watch 2
+keenetic interface list --all --watch 2
 keenetic traffic --top 10 --period 1h --watch 5
 keenetic wifi --watch 3
 keenetic system --watch 2
 keenetic vpn peers --watch 5
-keenetic clients inspect Laptop --watch 3
-keenetic policy inspect VPN --watch 5
+keenetic client show Laptop --watch 3
+keenetic policy show VPN --watch 5
 keenetic logs --watch 5
 ```
 
@@ -458,7 +481,7 @@ The interval is an integer from 1 to 3600 seconds, measured after each completed
 List connected clients:
 
 ```bash
-keenetic policy
+keenetic client list
 ```
 
 ```text
@@ -472,8 +495,8 @@ The list uses the same compact, borderless style as router status. Columns fit t
 Include known offline clients, or show only offline clients:
 
 ```bash
-keenetic policy --all
-keenetic policy --offline
+keenetic client list --all
+keenetic client list --offline
 ```
 
 Offline rows are marked explicitly and are never the default interactive selection.
@@ -481,7 +504,7 @@ Offline rows are marked explicitly and are never the default interactive selecti
 Machine-readable output includes the stable MAC needed by mutation and Wake-on-LAN workflows:
 
 ```bash
-keenetic policy --all --json
+keenetic client list --all --json
 ```
 
 ```json
@@ -502,20 +525,23 @@ keenetic policy --all --json
 
 ```bash
 keenetic policy --interactive
+keenetic policy --interactive --all --dry-run
 keenetic policy "Living Room TV"
 ```
 
 When `fzf` is available, both client and policy menus are searchable, and client fields use aligned name, IP, policy, and status columns. Otherwise the built-in menu uses Up/Down arrows, Enter, and Esc or `q`. The native menu redraws after terminal resizing and conservatively truncates double-width Unicode. The current device and current policy are initially selected. Interactive policy choices include **Block Internet**, which requires confirmation.
+
+`--interactive` accepts several clients: press Tab in fzf or Space in the arrow menu to mark them, then Enter. One policy is then chosen for all marked clients and applied as a batch with the same plan output, sequential verification, and history recording as the flag form.
 
 #### Assigning policies and blocking
 
 The verb forms take one or more clients by name, IP address, or MAC address and detect which was given:
 
 ```bash
-keenetic policy set "Living Room TV" VPN
-keenetic policy set 192.168.1.20 aa:bb:cc:dd:ee:ff Policy1
-keenetic policy block Tablet
-keenetic policy unblock Tablet
+keenetic policy assign "Living Room TV" VPN
+keenetic policy assign 192.168.1.20 aa:bb:cc:dd:ee:ff Policy1
+keenetic client block Tablet
+keenetic client unblock Tablet
 ```
 
 The equivalent flag forms use explicit selectors, which can be mixed in one batch:
@@ -548,53 +574,62 @@ Preview resolution and the complete plan without sending a POST:
 
 ```bash
 keenetic policy --client Laptop --client Phone --policy VPN --dry-run
-keenetic wake --client Desktop --dry-run
+keenetic client wake --client Desktop --dry-run
 ```
 
 #### Undo
 
 Verified policy, block, and unblock changes are recorded in a bounded 20-entry history at `${XDG_STATE_HOME:-~/.local/state}/keenetic-policy/history.json`. Entries contain the router URL, client name and MAC, before/after state, action, and timestamp; no passwords, challenge hashes, or session cookies are stored.
 
-Restore and verify the newest entry for the selected router:
+Restore and verify the newest entry for the selected router, or pick an older one:
 
 ```bash
-keenetic policy --undo
-keenetic policy --undo --dry-run
+keenetic policy undo
+keenetic policy undo --dry-run
+keenetic policy undo --interactive
 ```
 
-A successful undo consumes that history entry.
+`--interactive` lists the recorded changes for this router, newest first, with the state each one would restore. A successful undo consumes that history entry.
 
-#### Policy details
+#### Policy list and details
 
 ```bash
-keenetic policy inspect VPN
-keenetic policy inspect Policy1 --json
-keenetic policy inspect default
+keenetic policy
+keenetic policy list --json
+keenetic policy show VPN
+keenetic policy show Policy1 --json
+keenetic policy show default
+keenetic policy show --interactive
 ```
 
-Shows permitted interfaces in their configured order, enabled state, priority, connection status, and assigned clients, including offline clients. `ORDER` follows the policy's permit list. `PRIORITY` uses a policy-specific value when supplied, otherwise the interface's global priority; JSON identifies this as `priority_source`. Global priorities alone do not define a custom policy's interface order. The default policy lists global interfaces in descending priority order.
+`policy list` shows every policy with its ID, permitted-interface count, and client count, plus a Blocked row for clients without Internet access. `policy show` adds the permitted interfaces in their configured order, enabled state, priority, connection status, and assigned clients, including offline clients. `ORDER` follows the policy's permit list. `PRIORITY` uses a policy-specific value when supplied, otherwise the interface's global priority; JSON identifies this as `priority_source`. Global priorities alone do not define a custom policy's interface order. The default policy lists global interfaces in descending priority order.
 
 ### Wake-on-LAN
 
 Send Wake-on-LAN to a known client, including an offline client:
 
 ```bash
-keenetic wake --client Desktop
+keenetic client wake --client Desktop
+keenetic client wake --interactive
 ```
 
-The router's Wake-on-LAN response is included in the success message. Repeat selectors to wake multiple clients, or add `--dry-run` to preview. Wake-on-LAN is not recorded in undo history.
+The router's Wake-on-LAN response is included in the success message. Repeat selectors to wake multiple clients, or add `--dry-run` to preview. `--interactive` lists every known client, including offline ones, and accepts several at once. Wake-on-LAN is not recorded in undo history.
 
 ### Interface control
 
-Select an interface and a Connect or Disconnect action:
+Enable or disable an interface by ID, or pick one interactively:
 
 ```bash
-keenetic interfaces --interactive
-keenetic interfaces -i --dry-run
-keenetic --router home interfaces -i
+keenetic interface up Wireguard0
+keenetic interface down OpenVPN0 --dry-run
+keenetic interface --interactive
+keenetic interface -i --dry-run
+keenetic --router home interface -i
 ```
 
-The interactive selector includes inactive interfaces so you can reconnect them. It uses fzf when installed, with an arrow-key fallback that adapts when the terminal is resized. Cancel either selector to leave the router unchanged. `--dry-run` previews the selected action without writing to the router.
+`up` and `down` check that the interface exists, apply the state, and verify it the same way the interactive path does.
+
+The interactive selector includes inactive interfaces so you can reconnect them. It uses fzf when installed, with an arrow-key fallback that adapts when the terminal is resized. The action menu offers Connect, Disconnect, Inspect, and Cancel; Inspect shows the same details as `interface show ID`, and `interface show --interactive` goes straight to that. Cancel either selector to leave the router unchanged. `--dry-run` previews the selected action without writing to the router.
 
 Connect enables the selected interface; Disconnect disables it. The command checks the interface still exists, applies the requested state, and verifies it with up to four reads over one second. It reports the resulting connection status separately: an enabled interface can still be disconnected while waiting for a VPN peer or physical link. Disabling the interface carrying your router connection can interrupt access and prevent verification. Changes affect the running configuration; this command does not explicitly save the startup configuration.
 
@@ -603,8 +638,8 @@ The implementation uses structured RCI `interface up` / `no up` commands, preser
 ### Client names and configuration persistence
 
 ```bash
-keenetic clients rename Laptop "Work laptop" --dry-run
-keenetic clients rename 192.168.1.10 "Work laptop"
+keenetic client rename Laptop "Work laptop" --dry-run
+keenetic client rename 192.168.1.10 "Work laptop"
 keenetic system changes
 keenetic system changes --watch 2 --json
 keenetic system save --dry-run
@@ -622,10 +657,11 @@ The status, mesh, station, route, and iPerf3 schemas follow the [RCI request ref
 ```bash
 keenetic system reboot
 keenetic system reboot --dry-run
+keenetic system reboot --yes
 keenetic --router home system reboot
 ```
 
-Reboot requests an immediate restart of the selected router, interrupting network access. `--dry-run` authenticates and previews the target without sending the reboot request. `--quiet` suppresses the success message. Reboot rejects `--watch` and `--json`.
+Reboot requests an immediate restart of the selected router, interrupting network access. In a terminal it first asks `Reboot ... now? [y/N]`; `--yes` (`-y`) or `--quiet` skips the question, and scripts without a terminal are not prompted. `--dry-run` authenticates and previews the target without sending the reboot request. `--quiet` also suppresses the success message. Reboot rejects `--watch` and `--json`.
 
 The command sends one structured RCI `system reboot` request and checks the response for errors. It does not retry or wait for the router to come back. If the connection closes before a response arrives, it reports an uncertain outcome with a nonzero exit code; the router may already be rebooting. It does not explicitly save pending configuration changes before restarting.
 
