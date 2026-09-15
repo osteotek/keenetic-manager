@@ -1,4 +1,4 @@
-_keenetic_policy() {
+_keenetic() {
     local current previous options
     current=${COMP_WORDS[COMP_CWORD]}
     previous=${COMP_WORDS[COMP_CWORD - 1]}
@@ -20,4 +20,4 @@ _keenetic_policy() {
     esac
 }
 
-complete -F _keenetic_policy keenetic-policy keenetic-policy.sh
+complete -F _keenetic keenetic

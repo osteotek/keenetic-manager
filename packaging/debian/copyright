@@ -1,6 +1,6 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-Upstream-Name: keenetic-policy
-Source: https://github.com/osteotek/keenetic-policy
+Upstream-Name: keenetic-manager
+Source: https://github.com/osteotek/keenetic-manager
 
 Files: *
 Copyright: 2026 osteotek

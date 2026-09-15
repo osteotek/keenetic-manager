@@ -17,7 +17,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y jq shellcheck
       - name: Verify tag and run checks
         run: |
-          version=$(./keenetic-policy.sh --version)
+          version=$(./keenetic --version)
           version=${version##* }
           test "v$version" = "$GITHUB_REF_NAME"
           make check

@@ -5,16 +5,16 @@ COMPLETIONDIR ?= $(PREFIX)/share/bash-completion/completions
 .PHONY: install uninstall check check-router release
 
 install:
-	install -Dm755 keenetic-policy.sh "$(DESTDIR)$(BINDIR)/keenetic-policy"
-	install -Dm644 completions/keenetic-policy.bash "$(DESTDIR)$(COMPLETIONDIR)/keenetic-policy"
+	install -Dm755 keenetic "$(DESTDIR)$(BINDIR)/keenetic"
+	install -Dm644 completions/keenetic.bash "$(DESTDIR)$(COMPLETIONDIR)/keenetic"
 
 uninstall:
-	rm -f "$(DESTDIR)$(BINDIR)/keenetic-policy"
-	rm -f "$(DESTDIR)$(COMPLETIONDIR)/keenetic-policy"
+	rm -f "$(DESTDIR)$(BINDIR)/keenetic"
+	rm -f "$(DESTDIR)$(COMPLETIONDIR)/keenetic"
 
 check:
-	bash -n keenetic-policy.sh tests/integration.sh tests/router-contract.sh scripts/build-release.sh completions/keenetic-policy.bash
-	@if command -v shellcheck >/dev/null 2>&1; then shellcheck keenetic-policy.sh tests/integration.sh tests/router-contract.sh scripts/build-release.sh completions/keenetic-policy.bash; else echo "shellcheck not found; skipping"; fi
+	bash -n keenetic tests/integration.sh tests/router-contract.sh scripts/build-release.sh completions/keenetic.bash
+	@if command -v shellcheck >/dev/null 2>&1; then shellcheck keenetic tests/integration.sh tests/router-contract.sh scripts/build-release.sh completions/keenetic.bash; else echo "shellcheck not found; skipping"; fi
 	./tests/integration.sh
 
 check-router:

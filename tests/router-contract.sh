@@ -11,7 +11,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-"$ROOT/keenetic-policy.sh" --all --json > "$output"
+"$ROOT/keenetic" --all --json > "$output"
 jq -e '
     type == "array"
     and all(.[];

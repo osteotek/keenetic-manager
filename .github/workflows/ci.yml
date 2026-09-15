@@ -20,11 +20,11 @@ jobs:
         run: |
           make release
           (cd dist && sha256sum -c SHA256SUMS)
-          ruby -c packaging/homebrew/keenetic-policy.rb
-          version=$(./keenetic-policy.sh --version)
+          ruby -c packaging/homebrew/keenetic-manager.rb
+          version=$(./keenetic --version)
           version=${version##* }
           expected=$(sed -n "s/^sha256sums=('\\([^']*\\)').*/\\1/p" packaging/aur/PKGBUILD)
-          actual=$(sha256sum "dist/keenetic-policy-$version.tar.gz")
+          actual=$(sha256sum "dist/keenetic-manager-$version.tar.gz")
           test "$expected" = "${actual%% *}"
       - name: Build Debian package
         run: |

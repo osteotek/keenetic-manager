@@ -1,8 +1,8 @@
-pkgbase = keenetic-policy
+pkgbase = keenetic-manager
 	pkgdesc = CLI for Keenetic client policies, Internet blocks, and Wake-on-LAN
-	pkgver = 1.1.2
+	pkgver = 1.1.3
 	pkgrel = 1
-	url = https://github.com/osteotek/keenetic-policy
+	url = https://github.com/osteotek/keenetic-manager
 	arch = any
 	license = MIT
 	depends = bash
@@ -10,7 +10,7 @@ pkgbase = keenetic-policy
 	depends = jq
 	depends = coreutils
 	optdepends = fzf: searchable interactive menus
-	source = keenetic-policy-1.1.2.tar.gz::https://github.com/osteotek/keenetic-policy/releases/download/v1.1.2/keenetic-policy-1.1.2.tar.gz
-	sha256sums = 05c886cd0700676e4ce1b9aad7b6f07eae2c9ec3b8a4eba3567e55dfda1e4f90
+	source = keenetic-manager-1.1.3.tar.gz::https://github.com/osteotek/keenetic-manager/releases/download/v1.1.3/keenetic-manager-1.1.3.tar.gz
+	sha256sums = 2d5c57a9b8d9f85ac1ec6eb5d99d23bb3d8524774c7c166b9e071d48f356559c
 
-pkgname = keenetic-policy
+pkgname = keenetic-manager

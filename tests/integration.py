@@ -21,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "keenetic-policy.sh"
+SCRIPT = ROOT / "keenetic"
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 REALM = "integration-realm"
 CHALLENGE = "integration-challenge"
@@ -295,7 +295,7 @@ def main():
             index = 1
 
             result = subprocess.run([str(SCRIPT), "--version"], cwd=ROOT, text=True, capture_output=True)
-            check(result.returncode == 0 and result.stdout.strip().endswith("1.1.2"), "version output")
+            check(result.returncode == 0 and result.stdout.strip().endswith("1.1.3"), "version output")
             report(index, "version output"); index += 1
 
             result = run(config)
@@ -523,9 +523,9 @@ def main():
             report(index, "real HTTPS trust, custom CA, and insecure transport"); index += 1
 
             completion = subprocess.run(
-                ["bash", "-c", 'source "$1"; COMP_WORDS=(keenetic-policy --ver); COMP_CWORD=1; '
-                 '_keenetic_policy; printf "%s\\n" "${COMPREPLY[@]}"', "_",
-                 str(ROOT / "completions" / "keenetic-policy.bash")],
+                ["bash", "-c", 'source "$1"; COMP_WORDS=(keenetic --ver); COMP_CWORD=1; '
+                 '_keenetic; printf "%s\\n" "${COMPREPLY[@]}"', "_",
+                 str(ROOT / "completions" / "keenetic.bash")],
                 text=True, capture_output=True, timeout=5,
             )
             check(completion.returncode == 0 and "--version" in completion.stdout, "Bash completion")

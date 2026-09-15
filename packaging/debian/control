@@ -1,13 +1,13 @@
-Source: keenetic-policy
+Source: keenetic-manager
 Section: net
 Priority: optional
 Maintainer: osteotek <osteotek@users.noreply.github.com>
 Build-Depends: debhelper-compat (= 13)
 Standards-Version: 4.7.0
-Homepage: https://github.com/osteotek/keenetic-policy
+Homepage: https://github.com/osteotek/keenetic-manager
 Rules-Requires-Root: no
 
-Package: keenetic-policy
+Package: keenetic-manager
 Architecture: all
 Depends: bash (>= 4.3), curl, jq, coreutils, ${misc:Depends}
 Recommends: fzf

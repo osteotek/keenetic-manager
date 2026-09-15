@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.3 - 2026-09-15
+
+- Rename the project and repository to `keenetic-manager`.
+- Rename the Bash script, installed command, and standalone release executable to `keenetic`.
+- Preserve existing configuration and history paths for compatibility.
+
 ## 1.1.2 - 2026-09-13
 
 - Rename the project, local checkout, and GitHub repository to `keenetic-policy`.
