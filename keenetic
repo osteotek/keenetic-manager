@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 
 PROGRAM=${0##*/}
-VERSION=1.1.3
+VERSION=1.2.0
 EXIT_GENERAL=1
 EXIT_USAGE=2
 EXIT_CLIENT=3
@@ -32,7 +32,21 @@ TMP_DIR=
 POLICY_QUERY=
 FZF_COMMAND=${KEENETIC_FZF:-fzf}
 ACTION=
+COMMAND=root
 VIEW_MODE=connected
+TRAFFIC_TOP=5
+TRAFFIC_PERIOD=3m
+SUBCOMMAND=
+INSPECT_QUERY=
+WATCH_INTERVAL=
+WATCH_SCREEN=false
+WATCH_SLEEP_PID=
+SESSION_READY=false
+DIAG_HOST=
+DIAG_INTERFACE=
+DIAG_ACTIVE_ENDPOINT=
+LOG_LIMIT=20
+LOG_FILTER=
 INTERACTIVE=false
 JSON_OUTPUT=false
 INIT_CONFIG=false
@@ -43,6 +57,8 @@ QUIET=false
 VERBOSE=false
 COLOR_MODE=auto
 SELECTED_CLIENT=
+SELECTED_INTERFACE=
+SELECTED_INTERFACE_ACTION=
 SELECTED_POLICY_ID=
 SELECTED_POLICY_LABEL=
 SELECTED_INDEX=0
@@ -70,13 +86,129 @@ declare -a POLICY_LABELS=()
 usage() {
     cat <<EOF
 Usage:
-  $PROGRAM [--all|--offline] [--json]
-  $PROGRAM --interactive
-  $PROGRAM CLIENT_NAME
-  $PROGRAM SELECTOR... (--policy POLICY|--block|--unblock|--wake) [--dry-run]
-  $PROGRAM --undo [--dry-run]
+  $PROGRAM [GLOBAL OPTIONS] [--all] [--json]
+  $PROGRAM [GLOBAL OPTIONS] policy [OPTIONS]
+  $PROGRAM [GLOBAL OPTIONS] interfaces [OPTIONS]
+  $PROGRAM [GLOBAL OPTIONS] traffic [OPTIONS]
+  $PROGRAM [GLOBAL OPTIONS] wifi [--all] [--json]
+  $PROGRAM [GLOBAL OPTIONS] clients [inspect NAME|IP|MAC] [OPTIONS]
+  $PROGRAM [GLOBAL OPTIONS] system [--json]
+  $PROGRAM [GLOBAL OPTIONS] vpn peers [--json]
+  $PROGRAM [GLOBAL OPTIONS] diagnose HOST [--interface ID] [--json]
+  $PROGRAM [GLOBAL OPTIONS] logs [--limit N] [--filter TEXT] [--json]
+  $PROGRAM [GLOBAL OPTIONS] wake SELECTOR... [--dry-run]
+  $PROGRAM --init [--router NAME] [--ca-file FILE|--insecure]
   $PROGRAM --discover
-  $PROGRAM --init
+  $PROGRAM --help
+  $PROGRAM --version
+
+Commands:
+  (none)      Show KeenDNS, connected clients, interfaces, IP addresses, and traffic totals
+  interfaces  List interfaces and interactively connect or disconnect them
+  traffic     Rank clients by recent traffic (default: top five, last three minutes)
+  wifi        Show the router's Wi-Fi networks, radios, security, and client counts
+  clients     List clients or inspect connection, policy, and recent traffic details
+  system      Show model, firmware, uptime, CPU, and memory
+  vpn         Show WireGuard peer endpoints, handshakes, and counters
+  diagnose    Run router-side ping/traceroute and show relevant recent logs
+  logs        Show recent router logs, with optional text filtering
+  policy      List clients and manage connection policies and Internet blocks
+  wake        Send Wake-on-LAN to known clients, including offline clients
+
+Setup and discovery:
+      --init                     Configure and test router credentials
+      --discover                 Probe the default gateway for Keenetic API access
+
+Status output (without a subcommand):
+      --all                      Include disabled, disconnected, and unknown interfaces
+      --json                     Emit router and interface status as JSON
+      --watch SECONDS             Refresh a read-only view (1–3600 seconds)
+
+Global options (before or after a subcommand):
+      --router NAME              Select a named router profile
+      --ca-file FILE             Trust this CA certificate for HTTPS
+      --insecure                 Disable HTTPS certificate verification
+  -q, --quiet                    Suppress successful action output
+  -v, --verbose                  Print connection diagnostics
+      --color[=WHEN]             Colors: auto, always, or never
+      --no-color                 Disable colors
+  -h, --help                     Show command-specific help
+  -V, --version                  Show version
+
+Configuration: $CONFIG_FILE
+Override it with KEENETIC_CONFIG.
+Run '$PROGRAM COMMAND --help' for command options.
+EOF
+}
+
+wifi_usage() {
+    cat <<EOF
+Usage:
+  $PROGRAM wifi [--all] [--json]
+  $PROGRAM wifi monitor [--json] [--watch SECONDS]
+
+List the router's Wi-Fi access-point networks with SSID, band, channel,
+channel width, security, connected-client count, and status.
+      --all                      Include disabled and inactive networks
+      --json                     Emit full network details as JSON
+      --watch SECONDS             Refresh the network or channel-load view
+
+Each access point is listed separately, including networks sharing an SSID
+across radio bands. Missing information is shown as - or unknown. This command
+reads the router's own networks; it does not scan for neighbouring networks.
+Global options work before or after wifi. Run '$PROGRAM --help' for details.
+EOF
+}
+
+traffic_usage() {
+    cat <<EOF
+Usage:
+  $PROGRAM traffic [--top N] [--period 3m|1h|3h|1d] [--json]
+
+Rank clients by received + sent traffic in the router's stored history.
+Results are immediate; no sampling wait is needed.
+      --top N                    Number of clients to show (default: 5)
+      --period PERIOD            History window: 3m, 1h, 3h, or 1d (default: 3m)
+      --watch SECONDS             Refresh the traffic table
+      --json                     Emit full names, addresses, and byte totals
+
+Uses the router's Traffic Monitor history for registered clients. Aggregate
+categories such as Other devices are excluded. RX/TX are client received/sent
+bytes, not current speeds or lifetime totals.
+Global options work before or after traffic. Run '$PROGRAM --help' for details.
+EOF
+}
+
+interfaces_usage() {
+    cat <<EOF
+Usage:
+  $PROGRAM interfaces [--all] [--json]
+  $PROGRAM interfaces --interactive [--dry-run]
+
+      --all                      Include inactive interfaces in the listing
+      --json                     Emit router address and interface data as JSON
+      --watch SECONDS             Refresh the interface listing
+  -i, --interactive              Select an interface and Connect/Disconnect action
+      --dry-run                  Preview the selected action without changing it
+
+Interactive mode includes all interfaces and uses fzf when available, otherwise
+arrow keys. Esc or q cancels the arrow selector. Connect enables an interface;
+Disconnect disables it. Enabling does not guarantee a working link or VPN peer.
+Disabling the interface carrying your router connection can end this session.
+
+Global options work before or after interfaces. Run '$PROGRAM --help' for details.
+EOF
+}
+
+policy_usage() {
+    cat <<EOF
+Usage:
+  $PROGRAM policy [--all|--offline] [--json]
+  $PROGRAM policy --interactive
+  $PROGRAM policy CLIENT_NAME
+  $PROGRAM policy SELECTOR... (--policy POLICY|--block|--unblock) [--dry-run]
+  $PROGRAM policy --undo [--dry-run]
+  $PROGRAM policy inspect POLICY [--json] [--watch SECONDS]
 
 Selectors (repeatable for batch changes):
       --client NAME              Select by exact client name
@@ -87,28 +219,18 @@ Actions:
       --policy POLICY            Apply policy ID, description, or "Default"
       --block                    Block Internet access
       --unblock                  Remove Internet block
-      --wake                     Send Wake-on-LAN
       --undo                     Restore the most recent recorded change
       --dry-run                  Resolve and print changes without POSTing
 
-Listing and connection:
+Listing:
   -i, --interactive              Select with fzf when available, else arrow keys
       --all                      Include connected and offline clients
       --offline                  Show only offline clients
-      --router NAME              Use config from $CONFIG_HOME/routers/NAME
-      --discover                 Test the default gateway for Keenetic API access
       --json                     Emit client list as JSON
-      --ca-file FILE             Trust this CA certificate for HTTPS
-      --insecure                 Disable HTTPS certificate verification
+      --watch SECONDS             Refresh a read-only list or inspection
 
-Output and setup:
-  -q, --quiet                    Suppress successful mutation output
-  -v, --verbose                  Print sanitized request and state diagnostics
-      --init                     Configure router credentials securely
-      --color[=WHEN]             Colors: auto, always, or never
-      --no-color                 Disable colors
-  -V, --version                  Show version
-  -h, --help                     Show this help
+Global options such as --router, --ca-file, --quiet, and --verbose work before
+or after policy. Run '$PROGRAM --help' for the full list.
 
 Interactive controls without fzf: Up/Down arrows move, Enter selects, Esc or q cancels.
 
@@ -116,6 +238,35 @@ Configuration: $CONFIG_FILE
 Override it with KEENETIC_CONFIG.
 EOF
 }
+read_command_usage() {
+    case $COMMAND in
+        clients)
+            printf 'Usage:\n  %s clients [--all|--offline] [--json] [--watch SECONDS]\n  %s clients inspect NAME|IP|MAC [--json] [--watch SECONDS]\n\nInspection includes offline clients. Use an IP or MAC to distinguish duplicate names.\n' "$PROGRAM" "$PROGRAM" ;;
+        system) printf 'Usage:\n  %s system [--json] [--watch SECONDS]\n\nShow model, firmware, uptime, CPU, RAM, swap, and connection counts.\n' "$PROGRAM" ;;
+        vpn) printf 'Usage:\n  %s vpn peers [--json] [--watch SECONDS]\n\nShow WireGuard peer endpoints, handshake age, online state, and cumulative RX/TX.\n' "$PROGRAM" ;;
+        diagnose) printf 'Usage:\n  %s diagnose HOST [--interface ID] [--json]\n\nRun four router-side pings and a bounded traceroute (12 hops), then show relevant\nrecent logs. Each test is limited to 60 seconds. Ctrl-C cancels the active test.\nCompletion means the tests ran; inspect their output for packet loss or failure.\n' "$PROGRAM" ;;
+        logs) printf 'Usage:\n  %s logs [--limit N] [--filter TEXT] [--json] [--watch SECONDS]\n\nRead the latest 20 log entries by default (maximum 1000). Filtering is literal\nand case-insensitive within those entries. Watch refreshes this view.\n' "$PROGRAM" ;;
+    esac
+    printf '\nGlobal options work before or after the command. Watch JSON emits one object per line.\n'
+}
+
+wake_usage() {
+    cat <<EOF
+Usage:
+  $PROGRAM [GLOBAL OPTIONS] wake SELECTOR... [--dry-run]
+  $PROGRAM wake CLIENT_NAME [--dry-run]
+
+Selectors (repeatable; targets are deduplicated by MAC):
+      --client NAME              Select by exact client name
+      --ip ADDRESS               Select by exact IP address
+      --mac ADDRESS              Select by exact MAC address
+      --dry-run                  Preview without sending a Wake-on-LAN request
+
+All known clients are searched, including offline clients.
+Global options work before or after wake. Run '$PROGRAM --help' for the full list.
+EOF
+}
+
 fail() {
     local status=$EXIT_GENERAL
     if [[ ${1-} =~ ^[1-9][0-9]*$ ]]; then
@@ -124,6 +275,11 @@ fail() {
     fi
     if [[ -n $OPERATION_CONTEXT ]]; then
         set -- "$OPERATION_CONTEXT: $*"
+    fi
+    if $WATCH_SCREEN; then
+        printf '\033[?1049l\033[?25h'
+        WATCH_SCREEN=false
+        CURSOR_HIDDEN=false
     fi
     printf '%sError:%s %s\n' "$RED" "$RESET" "$*" >&2
     exit "$status"
@@ -170,25 +326,98 @@ add_client_selector() {
 set_action() {
     local action=$1
     [[ -z $ACTION || $ACTION == "$action" ]] \
-        || fail "$EXIT_USAGE" 'use only one of --policy, --block, --unblock, or --wake'
+        || fail "$EXIT_USAGE" 'use only one of --policy, --block, or --unblock'
     ACTION=$action
 }
 
 parse_args() {
-    local selector
+    local scope=root selector help=false version=false
     local -a positional=()
     while (($#)); do
+        if [[ $scope == root ]]; then
+            case $1 in
+                policy|wake|interfaces|traffic|wifi|clients|system|vpn|diagnose|logs|--watch|--watch=*|--all|--json|--init|--discover|--router|--router=*|--ca-file|--ca-file=*|--insecure|-q|--quiet|-v|--verbose|--color|--color=*|--no-color|-h|--help|-V|--version) ;;
+                *) fail "$EXIT_USAGE" "unknown command or option: $1. Run '$PROGRAM --help'." ;;
+            esac
+        elif [[ $scope == clients || $scope == system || $scope == vpn || $scope == diagnose || $scope == logs ]]; then
+            case $1 in
+                --json|--watch|--watch=*|--router|--router=*|--ca-file|--ca-file=*|--insecure|-q|--quiet|-v|--verbose|--color|--color=*|--no-color|-h|--help|-V|--version|--) ;;
+                --all|--offline) [[ $scope == clients ]] || fail "$EXIT_USAGE" "$1 is only valid for client listings" ;;
+                --interface|--interface=*) [[ $scope == diagnose ]] || fail "$EXIT_USAGE" "$1 is only valid for diagnose" ;;
+                --limit|--limit=*|--filter|--filter=*) [[ $scope == logs ]] || fail "$EXIT_USAGE" "$1 is only valid for logs" ;;
+                -*) fail "$EXIT_USAGE" "unknown option for $scope: $1" ;;
+            esac
+        elif [[ $scope == wifi ]]; then
+            case $1 in
+                monitor|--watch|--watch=*|--all|--json|--router|--router=*|--ca-file|--ca-file=*|--insecure|-q|--quiet|-v|--verbose|--color|--color=*|--no-color|-h|--help|-V|--version) ;;
+                *) fail "$EXIT_USAGE" "unknown option for wifi: $1. Run '$PROGRAM wifi --help'." ;;
+            esac
+        elif [[ $scope == traffic ]]; then
+            case $1 in
+                --watch|--watch=*|--top|--top=*|--period|--period=*|--json|--router|--router=*|--ca-file|--ca-file=*|--insecure|-q|--quiet|-v|--verbose|--color|--color=*|--no-color|-h|--help|-V|--version) ;;
+                *) fail "$EXIT_USAGE" "unknown option for traffic: $1. Run '$PROGRAM traffic --help'." ;;
+            esac
+        elif [[ $scope == interfaces ]]; then
+            case $1 in
+                --watch|--watch=*|--all|--json|-i|--interactive|--dry-run|--router|--router=*|--ca-file|--ca-file=*|--insecure|-q|--quiet|-v|--verbose|--color|--color=*|--no-color|-h|--help|-V|--version) ;;
+                *) fail "$EXIT_USAGE" "unknown option for interfaces: $1. Run '$PROGRAM interfaces --help'." ;;
+            esac
+        elif [[ $scope == wake ]]; then
+            case $1 in
+                --client|--client=*|--ip|--ip=*|--mac|--mac=*|--dry-run|--router|--router=*|--ca-file|--ca-file=*|--insecure|-q|--quiet|-v|--verbose|--color|--color=*|--no-color|-h|--help|-V|--version|--) ;;
+                -*) fail "$EXIT_USAGE" "unknown option for wake: $1. Run '$PROGRAM wake --help'." ;;
+            esac
+        fi
         case $1 in
+            policy|wake|interfaces|traffic|wifi|clients|system|vpn|diagnose|logs)
+                if [[ $scope == root ]]; then
+                    $INIT_CONFIG || $DISCOVER \
+                        && fail "$EXIT_USAGE" '--init and --discover cannot be combined with a subcommand'
+                    scope=$1
+                    COMMAND=$scope
+                    [[ $scope != wake ]] || ACTION=wake
+                else
+                    positional+=("$1")
+                fi
+                ;;
             -h|--help)
-                usage
-                exit 0
+                help=true
                 ;;
             -V|--version)
-                printf '%s %s\n' "$PROGRAM" "$VERSION"
-                exit 0
+                version=true
                 ;;
             -i|--interactive)
                 INTERACTIVE=true
+                ;;
+            --watch|--interface|--limit|--filter)
+                (($# >= 2)) || fail "$EXIT_USAGE" "$1 requires a value"
+                case $1 in
+                    --watch) WATCH_INTERVAL=$2 ;;
+                    --interface) [[ $scope == diagnose ]] || fail "$EXIT_USAGE" '--interface is only valid for diagnose'; DIAG_INTERFACE=$2 ;;
+                    --limit) [[ $scope == logs ]] || fail "$EXIT_USAGE" '--limit is only valid for logs'; LOG_LIMIT=$2 ;;
+                    --filter) [[ $scope == logs ]] || fail "$EXIT_USAGE" '--filter is only valid for logs'; LOG_FILTER=$2 ;;
+                esac
+                [[ -n $2 ]] || fail "$EXIT_USAGE" "$1 requires a non-empty value"
+                shift
+                ;;
+            --watch=*|--interface=*|--limit=*|--filter=*)
+                [[ -n ${1#*=} ]] || fail "$EXIT_USAGE" "${1%%=*} requires a non-empty value"
+                case $1 in
+                    --watch=*) WATCH_INTERVAL=${1#*=} ;;
+                    --interface=*) [[ $scope == diagnose ]] || fail "$EXIT_USAGE" '--interface is only valid for diagnose'; DIAG_INTERFACE=${1#*=} ;;
+                    --limit=*) [[ $scope == logs ]] || fail "$EXIT_USAGE" '--limit is only valid for logs'; LOG_LIMIT=${1#*=} ;;
+                    --filter=*) [[ $scope == logs ]] || fail "$EXIT_USAGE" '--filter is only valid for logs'; LOG_FILTER=${1#*=} ;;
+                esac
+                ;;
+            --top|--period)
+                [[ $scope == traffic ]] || fail "$EXIT_USAGE" "$1 is only valid for traffic"
+                (($# >= 2)) || fail "$EXIT_USAGE" "$1 requires a value"
+                if [[ $1 == --top ]]; then TRAFFIC_TOP=$2; else TRAFFIC_PERIOD=$2; fi
+                shift
+                ;;
+            --top=*|--period=*)
+                [[ $scope == traffic ]] || fail "$EXIT_USAGE" "${1%%=*} is only valid for traffic"
+                if [[ $1 == --top=* ]]; then TRAFFIC_TOP=${1#*=}; else TRAFFIC_PERIOD=${1#*=}; fi
                 ;;
             --client|--ip|--mac)
                 (($# >= 2)) || fail "$EXIT_USAGE" "$1 requires a value"
@@ -218,7 +447,7 @@ parse_args() {
                 set_action unblock
                 ;;
             --wake)
-                set_action wake
+                fail "$EXIT_USAGE" "use the '$PROGRAM wake' subcommand instead of --wake"
                 ;;
             --undo)
                 UNDO=true
@@ -245,6 +474,7 @@ parse_args() {
                 ROUTER_PROFILE=${1#*=}
                 ;;
             --discover)
+                [[ $scope == root ]] || fail "$EXIT_USAGE" "use '$PROGRAM --discover' outside the policy subcommand"
                 DISCOVER=true
                 ;;
             --json)
@@ -257,6 +487,7 @@ parse_args() {
                 VERBOSE=true
                 ;;
             --init)
+                [[ $scope == root ]] || fail "$EXIT_USAGE" "use '$PROGRAM --init' outside the policy subcommand"
                 INIT_CONFIG=true
                 ;;
             --ca-file)
@@ -300,6 +531,68 @@ parse_args() {
         shift
     done
 
+    if $help; then
+        case $scope in
+            root) usage ;;
+            policy) policy_usage ;;
+            interfaces) interfaces_usage ;;
+            traffic) traffic_usage ;;
+            wifi) wifi_usage ;;
+            clients|system|vpn|diagnose|logs) read_command_usage ;;
+            wake) wake_usage ;;
+        esac
+        exit 0
+    fi
+    if $version; then
+        printf '%s %s\n' "$PROGRAM" "$VERSION"
+        exit 0
+    fi
+    if [[ $COMMAND == traffic ]]; then
+        if ! { [[ $TRAFFIC_TOP =~ ^[1-9][0-9]{0,9}$ ]] && ((TRAFFIC_TOP <= 2147483647)); }; then
+            fail "$EXIT_USAGE" '--top requires a positive integer (maximum 2147483647)'
+        fi
+        case $TRAFFIC_PERIOD in
+            3m|1h|3h|1d) ;;
+            *) fail "$EXIT_USAGE" '--period must be 3m, 1h, 3h, or 1d' ;;
+        esac
+    fi
+    if [[ $VIEW_MODE != connected ]] && { $INIT_CONFIG || $DISCOVER || [[ $COMMAND == wake || $COMMAND == traffic || $COMMAND == system || $COMMAND == vpn || $COMMAND == logs || $COMMAND == diagnose ]]; }; then
+        fail "$EXIT_USAGE" '--all is only valid for interface or policy listings'
+    fi
+    case $COMMAND in
+        clients)
+            if ((${#positional[@]})); then
+                [[ ${#positional[@]} == 2 && ${positional[0]} == inspect ]] || fail "$EXIT_USAGE" 'use clients inspect NAME|IP|MAC'
+                SUBCOMMAND=inspect; INSPECT_QUERY=${positional[1]}; positional=()
+            fi ;;
+        policy)
+            if [[ ${positional[0]-} == inspect ]]; then
+                [[ ${#positional[@]} == 2 ]] || fail "$EXIT_USAGE" 'policy inspect requires a policy ID or description'
+                SUBCOMMAND=inspect; INSPECT_QUERY=${positional[1]}; positional=()
+            fi ;;
+        wifi)
+            if ((${#positional[@]})); then
+                [[ ${#positional[@]} == 1 && ${positional[0]} == monitor ]] || fail "$EXIT_USAGE" 'use wifi monitor'
+                SUBCOMMAND=monitor; positional=()
+            fi ;;
+        vpn)
+            [[ ${#positional[@]} == 0 || ( ${#positional[@]} == 1 && ${positional[0]} == peers ) ]] || fail "$EXIT_USAGE" 'use vpn peers'
+            SUBCOMMAND=peers; positional=() ;;
+        system|logs) ((${#positional[@]} == 0)) || fail "$EXIT_USAGE" "$COMMAND does not accept positional arguments" ;;
+        diagnose)
+            [[ ${#positional[@]} == 1 ]] || fail "$EXIT_USAGE" 'diagnose requires a hostname or IP address'
+            DIAG_HOST=${positional[0]}; positional=()
+            [[ $DIAG_HOST =~ ^[a-zA-Z0-9:][a-zA-Z0-9.:%_-]*$ && ${#DIAG_HOST} -le 253 ]] || fail "$EXIT_USAGE" 'invalid diagnostic hostname or IP address' ;;
+    esac
+    [[ $SUBCOMMAND != inspect || -n $INSPECT_QUERY ]] || fail "$EXIT_USAGE" 'inspect requires a non-empty name or ID'
+    if [[ $SUBCOMMAND == inspect ]] && { $INTERACTIVE || $DRY_RUN || $UNDO || [[ -n $ACTION ]] || ((${#CLIENT_SELECTORS[@]})); }; then
+        fail "$EXIT_USAGE" 'inspect cannot be combined with client selectors or actions'
+    fi
+    if [[ $COMMAND == logs ]]; then
+        if ! { [[ $LOG_LIMIT =~ ^[1-9][0-9]{0,3}$ ]] && ((LOG_LIMIT <= 1000)); }; then
+            fail "$EXIT_USAGE" '--limit must be between 1 and 1000'
+        fi
+    fi
     for value in "${positional[@]}"; do
         add_client_selector client "$value"
     done
@@ -324,7 +617,7 @@ parse_args() {
             && fail "$EXIT_USAGE" '--init cannot be combined with a client, action, --interactive, or --json'
     fi
     if $JSON_OUTPUT && { $INTERACTIVE || [[ -n $ACTION ]] || ((${#CLIENT_SELECTORS[@]} > 0)); }; then
-        fail "$EXIT_USAGE" '--json is only valid when listing clients'
+        fail "$EXIT_USAGE" '--json is only valid for non-interactive listings'
     fi
     if [[ -n $ACTION ]] && ((${#CLIENT_SELECTORS[@]} == 0)); then
         fail "$EXIT_USAGE" 'an action requires at least one --client, --ip, or --mac selector'
@@ -337,6 +630,14 @@ parse_args() {
     fi
     if $DRY_RUN && [[ -z $ACTION ]] && ! $INTERACTIVE && ! $UNDO; then
         fail "$EXIT_USAGE" '--dry-run requires an action, --interactive, or --undo'
+    fi
+    if [[ -n $WATCH_INTERVAL ]]; then
+        if ! { [[ $WATCH_INTERVAL =~ ^[1-9][0-9]{0,3}$ ]] && ((WATCH_INTERVAL <= 3600)); }; then
+            fail "$EXIT_USAGE" '--watch must be between 1 and 3600 seconds'
+        fi
+        $INIT_CONFIG || $DISCOVER || $INTERACTIVE || $DRY_RUN || $UNDO || [[ -n $ACTION || $COMMAND == diagnose ]] || ((${#CLIENT_SELECTORS[@]})) \
+            && fail "$EXIT_USAGE" '--watch is only available for read-only views'
+        [[ -t 1 ]] || $JSON_OUTPUT || fail "$EXIT_USAGE" '--watch requires a terminal or --json'
     fi
 }
 
@@ -471,6 +772,11 @@ show_cursor() {
 }
 
 cleanup() {
+    [[ -z $WATCH_SLEEP_PID ]] || kill "$WATCH_SLEEP_PID" 2>/dev/null || true
+    if [[ -n $DIAG_ACTIVE_ENDPOINT && -n $TMP_DIR ]]; then
+        (HTTP_TIMEOUT=3 http_request DELETE "$DIAG_ACTIVE_ENDPOINT" "$TMP_DIR/cancel.json") >/dev/null 2>&1 || true
+    fi
+    $WATCH_SCREEN && printf '\033[?1049l' || true
     show_cursor
     [[ -z ${TMP_DIR:-} ]] || rm -rf -- "$TMP_DIR"
 }
@@ -489,7 +795,7 @@ http_request() {
         --silent
         --show-error
         --connect-timeout 5
-        --max-time 20
+        --max-time "${HTTP_TIMEOUT:-20}"
         --cookie "$TMP_DIR/cookies"
         --cookie-jar "$TMP_DIR/cookies"
         --dump-header "$TMP_DIR/headers"
@@ -526,7 +832,7 @@ Check ROUTER_URL and the current network connection."
 Check that this device is on the router network and its web interface is available."
             ;;
         28)
-            fail "the router at $ROUTER_URL did not respond within 20 seconds
+            fail "the router at $ROUTER_URL did not respond within ${HTTP_TIMEOUT:-20} seconds
 Check the network connection and router address."
             ;;
         60)
@@ -745,6 +1051,495 @@ api_get() {
 The installed Keenetic firmware may not support this API."
 }
 
+fetch_interface_status() {
+    api_get /rci/show/interface "$TMP_DIR/interfaces.json" 'interfaces' object
+    # Whitelist status fields: the raw response can also contain VPN peer data.
+    if ! jq --arg router "$ROUTER_URL" --arg view "$VIEW_MODE" '
+        def text: if type == "string" then . else "" end;
+        def connection:
+            if . == "yes" or . == true then true
+            elif . == "no" or . == false then false else null end;
+        if any(.[]; type != "object") then error("invalid interface entry") else . end
+        | {router: $router, interfaces: [to_entries[]
+            | .key as $key | .value
+            | {
+                id: ((.id | text | select(length > 0)) // $key),
+                description: (.description | text),
+                type: (.type | text),
+                state: (.state | text),
+                link: (.link | text),
+                connected: (.connected | connection),
+                ipv4: (.address | text | select(length > 0)) // null,
+                mask: (.mask | text | select(length > 0)) // null,
+                ipv6: [(.ipv6.addresses // [])[]
+                    | select((.address | type) == "string" and (.address | length) > 0)
+                    | {address: .address, prefix_length: (."prefix-length" // null)}]
+            }
+            | .vpn = (.type | test("wireguard|openvpn|l2tp|pptp|sstp|ipsec|ike|openconnect|zerotier|proxy"; "i"))
+            | .status = (if .state == "down" then "disabled"
+                         elif .connected == true then "connected"
+                         elif .connected == false then "disconnected"
+                         elif .link == "up" then "link up"
+                         elif .link == "down" then "link down"
+                         else "unknown" end)
+            | select($view == "all" or
+                (.state != "down" and .link != "down" and
+                 (.connected == true or (.connected == null and .link == "up"))))
+        ] | sort_by([(.vpn | not), .id])}
+    ' "$TMP_DIR/interfaces.json" > "$TMP_DIR/status.json"; then
+        fail 'the router returned invalid interface status data'
+    fi
+    debug "Router: $ROUTER_URL"
+    debug "Interfaces: $(jq '.interfaces | length' "$TMP_DIR/status.json")"
+}
+
+fetch_status_details() {
+    fetch_keendns_status
+    fetch_interface_traffic
+    jq --slurpfile dns "$TMP_DIR/keendns.json" '.keendns = $dns[0]' \
+        "$TMP_DIR/status.json" > "$TMP_DIR/status-details.json"
+    mv "$TMP_DIR/status-details.json" "$TMP_DIR/status.json"
+}
+
+fetch_keendns_status() {
+    printf 'null\n' > "$TMP_DIR/keendns.json"
+    http_request GET /rci/show/ndns "$TMP_DIR/ndns.json"
+    if [[ $HTTP_STATUS == 401 || $HTTP_STATUS == 403 ]]; then
+        response_error 'failed to retrieve KeenDNS status' "$TMP_DIR/ndns.json"
+    fi
+    if [[ $HTTP_STATUS == 200 ]] && jq -e '
+        type == "object" and ([.. | objects | select(.status? == "error")] | length == 0)
+    ' "$TMP_DIR/ndns.json" >/dev/null 2>&1; then
+        jq '
+            def text: if type == "string" and length > 0 then . else null end;
+            (.name | text) as $name | (.domain | text) as $domain
+            | {hostname: (if $name == null or $domain == null then null
+                          elif $name | endswith("." + $domain) then $name
+                          else $name + "." + $domain end), access: (.access | text)}
+        ' "$TMP_DIR/ndns.json" > "$TMP_DIR/keendns.json"
+    else
+        warn "KeenDNS status unavailable (HTTP $HTTP_STATUS)."
+    fi
+}
+
+fetch_interface_traffic() {
+    local payload count unavailable
+    count=$(jq '.interfaces | length' "$TMP_DIR/status.json")
+    printf '[]\n' > "$TMP_DIR/traffic.json"
+    if ((count > 0)); then
+        # RCI requires the interface name as an argument, not a URL path segment.
+        # Every command in this POST is a read-only show operation.
+        payload=$(jq -c '[.interfaces[] | {show:{interface:{name:.id, stat:{}}}}]' "$TMP_DIR/status.json")
+        http_request POST /rci/ "$TMP_DIR/traffic-response.json" "$payload"
+        if [[ $HTTP_STATUS == 401 || $HTTP_STATUS == 403 ]]; then
+            response_error 'failed to retrieve traffic statistics' "$TMP_DIR/traffic-response.json"
+        fi
+        # Positional results can only be matched safely when all entries are present.
+        if [[ $HTTP_STATUS == 200 ]] && jq -e --argjson count "$count" '
+            type == "array" and length == $count
+        ' "$TMP_DIR/traffic-response.json" >/dev/null 2>&1; then
+            jq '
+                def counter:
+                    (try tonumber catch null)
+                    | if type == "number" and . >= 0 and floor == . then . else null end;
+                map(
+                    if type != "object" then null
+                    elif any(.. | objects; .status? == "error") then null
+                    else (.show.interface.stat // null)
+                        | if type != "object" then null else {
+                            rx_bytes: (.rxbytes | counter), tx_bytes: (.txbytes | counter),
+                            rx_packets: (.rxpackets | counter), tx_packets: (.txpackets | counter),
+                            rx_errors: (.rxerrors | counter), tx_errors: (.txerrors | counter),
+                            rx_dropped: (.rxdropped | counter), tx_dropped: (.txdropped | counter)
+                        } | if all(.[]; . == null) then null else . end end
+                    end
+                )
+            ' "$TMP_DIR/traffic-response.json" > "$TMP_DIR/traffic.json" || {
+                printf '[]\n' > "$TMP_DIR/traffic.json"
+            }
+        fi
+    fi
+    jq --slurpfile traffic "$TMP_DIR/traffic.json" '
+        .interfaces |= (to_entries | map(.value + {traffic: $traffic[0][.key]}))
+    ' "$TMP_DIR/status.json" > "$TMP_DIR/status-details.json"
+    mv "$TMP_DIR/status-details.json" "$TMP_DIR/status.json"
+    unavailable=$(jq '[.interfaces[] | select(.traffic == null)] | length' "$TMP_DIR/status.json")
+    if ((unavailable > 0)); then
+        warn "Traffic statistics unavailable for $unavailable of $count interfaces."
+    fi
+}
+
+fetch_wifi_networks() {
+    api_get /rci/show/interface "$TMP_DIR/wifi-interfaces.json" 'Wi-Fi interfaces' object
+    if ! jq --arg router "$ROUTER_URL" --arg view "$VIEW_MODE" '
+        def text: if type == "string" then . else null end;
+        def positive:
+            if type == "number" or type == "string" then
+                (try tonumber catch null) | if . != null and . > 0 then . else null end
+            else null end;
+        def band:
+            if type == "number" or type == "string" then tostring | ascii_downcase | gsub("[ -]|ghz"; "")
+                | if . == "2.4" then "2.4 GHz" elif . == "5" then "5 GHz" elif . == "6" then "6 GHz" else null end
+            else null end;
+        if any(.[]; type != "object") or any(.. | objects; .status? == "error")
+            then error("invalid interfaces") else . end
+        | [to_entries[] | .key as $key | .value
+            | .id = ((.id | text | select(length > 0)) // $key)] as $interfaces
+        | ($interfaces | map({key:.id, value:.}) | from_entries) as $by_id
+        | {router:$router, networks: [$interfaces[]
+            | select(.type == "AccessPoint" or (.id | test("^WifiMaster[0-9]+/AccessPoint[0-9]+$")))
+            | (.id | split("/")[0]) as $radio_id
+            | ($by_id[$radio_id] // {}) as $radio
+            | ((.band | band) // ($radio.band | band)) as $reported_band
+            | ((.frequency | positive) // ($radio.frequency | positive)) as $frequency
+            | (if $frequency >= 2400 and $frequency < 2500 then "2.4 GHz"
+               elif $frequency >= 4900 and $frequency < 5925 then "5 GHz"
+               elif $frequency >= 5925 and $frequency <= 7125 then "6 GHz" else null end) as $frequency_band
+            | {
+                id, radio_id:$radio_id, ssid:(.ssid | text), description:(.description | text),
+                bssid:(.mac | text), state:(.state | text), link:(.link | text),
+                band: ($reported_band // $frequency_band //
+                    (if $radio_id == "WifiMaster0" then "2.4 GHz"
+                     elif $radio_id == "WifiMaster1" then "5 GHz" else null end)),
+                band_source: (if $reported_band != null then "reported"
+                    elif $frequency_band != null then "frequency"
+                    elif $radio_id == "WifiMaster0" or $radio_id == "WifiMaster1" then "radio_id" else null end),
+                channel: ((.channel | positive) // ($radio.channel | positive)),
+                channel_width_mhz: ((.bandwidth | positive) // ($radio.bandwidth | positive)),
+                authentication:(."auth-type" | text), encryption:(.encryption | text), clients:null,
+                status:(if .state == "down" or $radio.state == "down" then "disabled"
+                    elif .link == "down" or $radio.link == "down" then "link down"
+                    elif .link == "up" or .connected == "yes" or .connected == true then "active"
+                    else "unknown" end)
+              }
+            | select($view == "all" or .status == "active")
+          ] | sort_by([.radio_id, .id])}
+    ' "$TMP_DIR/wifi-interfaces.json" > "$TMP_DIR/wifi.json"; then
+        fail 'the router returned invalid Wi-Fi interface data'
+    fi
+    http_request GET /rci/show/ip/hotspot/host "$TMP_DIR/wifi-hosts.json"
+    if [[ $HTTP_STATUS == 401 || $HTTP_STATUS == 403 ]]; then
+        response_error 'failed to retrieve Wi-Fi clients' "$TMP_DIR/wifi-hosts.json"
+    fi
+    if [[ $HTTP_STATUS == 200 ]] && jq -e 'type == "array" and all(.[]; type == "object")' \
+        "$TMP_DIR/wifi-hosts.json" >/dev/null 2>&1; then
+        jq --slurpfile hosts "$TMP_DIR/wifi-hosts.json" '
+            [$hosts[0][] | select((.mac | type) == "string" and .mac != "")
+                | select(.link == "up" or .mws.link? == "up")
+                | {mac:(.mac | ascii_downcase), aps:([.ap, .mws.ap?] | map(select(type == "string")))}] as $clients
+            | .networks |= map(.id as $id
+                | .clients = ([$clients[] | select(.aps | index($id)) | .mac] | unique | length))
+        ' "$TMP_DIR/wifi.json" > "$TMP_DIR/wifi-clients.json"
+        mv "$TMP_DIR/wifi-clients.json" "$TMP_DIR/wifi.json"
+    else
+        warn "Wi-Fi client counts unavailable (HTTP $HTTP_STATUS)."
+    fi
+}
+
+list_wifi_networks() {
+    jq -r --arg columns "$(terminal_columns)" --arg dim "$DIM" --arg reset "$RESET" \
+        --arg view "$VIEW_MODE" \
+        "$(table_format_filter)"'
+        def value: if . == null or . == "" then "-" else tostring | clean end;
+        def security:
+            if .encryption != null and .encryption != "" and .encryption != "none" then .encryption | ascii_upcase
+            elif .authentication != null and .authentication != "" and .authentication != "none" then .authentication | ascii_upcase
+            elif .encryption == "none" and .authentication == "none" then "Open" else "unknown" end;
+        ($columns | tonumber | if . < 20 then 20 else . end) as $screen
+        | [.networks[] | {ssid:(.ssid | value), band:(.band | value), channel:(.channel | value),
+            width:(.channel_width_mhz | value), security:(security | clean),
+            clients:(.clients | value), status}] as $rows
+        | "Wi-Fi networks",
+          (if $rows | length == 0 then
+                (if $view == "all" then "No Wi-Fi networks found." else "No active Wi-Fi networks." end) | wordwrap($screen)[]
+           else ($screen >= 72) as $wide
+            | ([$rows[].status | width] + [6] | max) as $status_width
+            | ([$rows[].band | width] + [4] | max) as $band_width
+            | ([$rows[].channel | width] + [2] | max) as $channel_width
+            | ([$rows[].width | width] + [5] | max) as $width_width
+            | ([$rows[].clients | width] + [7] | max) as $clients_width
+            | ([$rows[].security | width] + [8] | max | . as $natural
+                | [$natural, ($screen * 0.2 | floor)] | min) as $security_width
+            | ([$rows[].ssid | width] + [4] | max | . as $natural
+                | [$natural, ($screen - $status_width - 2
+                    - (if $wide then $band_width + $channel_width + $width_width
+                        + $clients_width + $security_width + 10 else 0 end))] | min) as $ssid_width
+            | def line($ssid; $band; $channel; $width; $security; $clients; $status):
+                ($ssid | fit($ssid_width; false)) + "  "
+                + (if $wide then ($band | pad($band_width; false)) + "  "
+                    + ($channel | pad($channel_width; true)) + "  " + ($width | pad($width_width; true)) + "  "
+                    + ($security | fit($security_width; false)) + "  " + ($clients | pad($clients_width; true)) + "  " else "" end)
+                + ($status | pad($status_width; false));
+            $dim + line("SSID"; "BAND"; "CH"; "WIDTH"; "SECURITY"; "CLIENTS"; "STATUS") + $reset,
+            ($rows[] | line(.ssid; .band; .channel; .width; .security; .clients; .status),
+                (if $wide then empty else
+                    (.band + " / CH " + .channel + " / " + .width + " MHz",
+                     .security + " / Clients: " + .clients)
+                    | wordwrap($screen - 2)[] | "  " + . end))
+           end)
+    ' "$TMP_DIR/wifi.json"
+}
+
+fetch_client_traffic() {
+    local detail seconds
+    case $TRAFFIC_PERIOD in
+        3m) detail=0; seconds=180 ;;
+        1h) detail=1; seconds=3600 ;;
+        3h) detail=2; seconds=10800 ;;
+        1d) detail=3; seconds=86400 ;;
+    esac
+    api_get "/rci/show/ip/hotspot/summary?count=$TRAFFIC_TOP&detail=$detail&attribute=sumbytes" \
+        "$TMP_DIR/traffic-summary.json" "$TRAFFIC_PERIOD client traffic summary" object
+    if ! jq --arg router "$ROUTER_URL" --arg period "$TRAFFIC_PERIOD" \
+        --argjson limit "$TRAFFIC_TOP" --argjson detail "$detail" --argjson seconds "$seconds" '
+        def counter:
+            if . == null then null
+            else (if type == "number" or type == "string" then tonumber else error("invalid counter") end)
+                | if . >= 0 and floor == . then . else error("invalid counter") end
+            end;
+        if .t != $detail or (.host | type) != "array"
+            or any(.. | objects; .status? == "error") then error("invalid traffic summary") else . end
+        | [.host[]
+            | if type != "object" then error("invalid host") else . end
+            | select(.type != "others" and .type != "unregistered" and .type != "multicast")
+            | if (.mac | type) != "string" then error("missing client MAC") else . end
+            | if (.mac | test("^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$") | not)
+                then error("invalid client MAC") else . end
+            | (.rxbytes | counter) as $rx | (.txbytes | counter) as $tx
+            | (.sumbytes | counter) as $sum
+            | ($sum // (if $rx != null and $tx != null then $rx + $tx else null end)) as $total
+            | if $total == null then error("missing traffic total") else . end
+            | {name: (if (.name | type) == "string" and (.name | length) > 0 then .name else .mac end),
+               mac: (.mac | ascii_downcase), ip: null, online: null,
+               rx_bytes: $rx, tx_bytes: $tx, total_bytes: $total}
+          ]
+        | group_by(.mac) | map(max_by(.total_bytes))
+        | sort_by([-.total_bytes, (.name | ascii_downcase), .mac]) | .[:$limit]
+        | to_entries | map(.value + {rank: (.key + 1)})
+        | {router: $router, period: $period, window_seconds: $seconds, limit: $limit, clients: .}
+    ' "$TMP_DIR/traffic-summary.json" > "$TMP_DIR/client-traffic.json"; then
+        fail "the router returned invalid $TRAFFIC_PERIOD traffic history; this firmware may not support the Traffic Monitor API"
+    fi
+
+    # Connection status comes from current links, not historical traffic activity.
+    http_request GET /rci/show/ip/hotspot/host "$TMP_DIR/traffic-hosts.json"
+    if [[ $HTTP_STATUS == 401 || $HTTP_STATUS == 403 ]]; then
+        response_error 'failed to retrieve traffic client details' "$TMP_DIR/traffic-hosts.json"
+    fi
+    if [[ $HTTP_STATUS == 200 ]] && jq -e 'type == "array" and all(.[]; type == "object")' \
+        "$TMP_DIR/traffic-hosts.json" >/dev/null 2>&1; then
+        jq --slurpfile hosts "$TMP_DIR/traffic-hosts.json" '
+            ($hosts[0] | map(select((.mac | type) == "string"))
+                | group_by(.mac | ascii_downcase)
+                | map({key: (.[0].mac | ascii_downcase), value: {
+                    ip: ([.[].ip | select(type == "string" and length > 0)] | first // null),
+                    online: (if any(.[]; .link == "up" or .mws.link? == "up") then true
+                             elif any(.[]; .link == "down" or .mws.link? == "down") then false
+                             else null end)
+                }}) | from_entries) as $known
+            | .clients |= map(.ip = $known[.mac].ip | .online = $known[.mac].online)
+        ' "$TMP_DIR/client-traffic.json" > "$TMP_DIR/client-traffic-addresses.json"
+        mv "$TMP_DIR/client-traffic-addresses.json" "$TMP_DIR/client-traffic.json"
+    else
+        warn "Traffic client details unavailable (HTTP $HTTP_STATUS)."
+    fi
+}
+
+list_client_traffic() {
+    jq -r --arg columns "$(terminal_columns)" --arg dim "$DIM" --arg reset "$RESET" \
+        "$(table_format_filter)"'
+        ($columns | tonumber | if . < 20 then 20 else . end) as $screen
+        | (.clients | map({name: (.name | clean), ip: ((.ip // "-") | clean),
+            rx: (.rx_bytes | bytes), tx: (.tx_bytes | bytes), total: (.total_bytes | bytes),
+            status: (if .online == true then "online" elif .online == false then "offline" else "unknown" end)})) as $rows
+        | ("Top \(.limit) clients · last " + (if .period == "3m" then "3 minutes"
+            elif .period == "1h" then "1 hour" elif .period == "3h" then "3 hours" else "1 day" end)
+            | wordwrap($screen)[]),
+          (if $rows | length == 0 then "No client traffic recorded." | wordwrap($screen)[]
+           else
+            ($screen >= 72) as $wide
+            | ($screen >= 32) as $inline_total
+            | ([$rows[].status | width] + [6] | max) as $status_width
+            | ([$rows[].rx | width] + [2] | max) as $rx_width
+            | ([$rows[].tx | width] + [2] | max) as $tx_width
+            | ([$rows[].total | width] + [5] | max) as $total_width
+            | ([$rows[].ip | width] + [10] | max | . as $natural
+                | [$natural, ($screen * 0.25 | floor)] | min) as $ip_width
+            | ([$rows[].name | width] + [4] | max | . as $natural
+                | [$natural, ($screen - $status_width - 2
+                    - (if $inline_total then $total_width + 2 else 0 end)
+                    - (if $wide then $ip_width + $rx_width + $tx_width + 6 else 0 end))]
+                | min) as $name_width
+            | def line($name; $ip; $rx; $tx; $total; $status):
+                ($name | fit($name_width; false)) + "  "
+                + (if $wide then ($ip | fit($ip_width; false)) + "  "
+                    + ($rx | pad($rx_width; true)) + "  " + ($tx | pad($tx_width; true)) + "  " else "" end)
+                + (if $inline_total then ($total | pad($total_width; true)) + "  " else "" end)
+                + ($status | pad($status_width; false));
+            $dim + line("NAME"; "IP ADDRESS"; "RX"; "TX"; "TOTAL"; "STATUS") + $reset,
+            ($rows[] | line(.name; .ip; .rx; .tx; .total; .status),
+                (if $wide then empty else (.ip, ("RX " + .rx + " / TX " + .tx))
+                    | wordwrap($screen - 2)[] | "  " + . end),
+                (if $inline_total then empty else "TOTAL " + .total | wordwrap($screen - 2)[] | "  " + . end))
+           end)
+    ' "$TMP_DIR/client-traffic.json"
+}
+
+fetch_client_summary() {
+    printf 'null\n' > "$TMP_DIR/client-summary.json"
+    http_request GET /rci/show/ip/hotspot/host "$TMP_DIR/status-clients.json"
+    if [[ $HTTP_STATUS == 401 || $HTTP_STATUS == 403 ]]; then
+        response_error 'failed to retrieve connected clients' "$TMP_DIR/status-clients.json"
+    fi
+    if [[ $HTTP_STATUS == 200 ]] && jq -e '
+        type == "array" and all(.[]; type == "object" and
+            (.mac | type == "string" and length > 0))
+    ' "$TMP_DIR/status-clients.json" >/dev/null 2>&1; then
+        if ! jq '
+            def wifi:
+                any([.ap, .mws.ap?][]; type == "string" and length > 0)
+                or any([.ssid, .mws.ssid?][]; type == "string");
+            [.[] | select(.link == "up" or .mws.link? == "up")]
+            | group_by(.mac | ascii_downcase)
+            | map(any(.[]; wifi))
+            | {connected: length, wired: (map(select(. == false)) | length),
+               wireless: (map(select(. == true)) | length)}
+        ' "$TMP_DIR/status-clients.json" > "$TMP_DIR/client-summary.json"; then
+            printf 'null\n' > "$TMP_DIR/client-summary.json"
+        fi
+    fi
+    if [[ $(cat "$TMP_DIR/client-summary.json") == null ]]; then
+        warn "Connected client counts unavailable (HTTP $HTTP_STATUS)."
+    fi
+    jq --slurpfile clients "$TMP_DIR/client-summary.json" '.clients = $clients[0]' \
+        "$TMP_DIR/status.json" > "$TMP_DIR/status-with-clients.json"
+    mv "$TMP_DIR/status-with-clients.json" "$TMP_DIR/status.json"
+}
+
+# Shared cell-aware formatting for non-interactive status and client tables.
+table_format_filter() {
+    cat <<'JQ'
+        def clean: gsub("[[:cntrl:]]"; " ");
+        # Terminal cell widths for common combining marks, CJK, and emoji.
+        def width:
+            explode | map(
+                if (. >= 768 and . <= 879) or (. >= 65024 and . <= 65039) or . == 8205 then 0
+                elif (. >= 4352 and . <= 4447) or (. >= 9001 and . <= 9002)
+                    or (. >= 11904 and . <= 42191) or (. >= 44032 and . <= 55203)
+                    or (. >= 63744 and . <= 64255) or (. >= 65040 and . <= 65049)
+                    or (. >= 65072 and . <= 65135) or (. >= 65281 and . <= 65376)
+                    or (. >= 65504 and . <= 65510) or (. >= 127744 and . <= 129791)
+                    or (. >= 131072 and . <= 262141) then 2 else 1 end
+            ) | add // 0;
+        def wrap($limit):
+            reduce (explode[] | [.] | implode) as $char
+                ({lines: [], text: "", size: 0};
+                 ($char | width) as $size
+                 | if .size + $size > $limit then
+                       .lines += [.text] | .text = $char | .size = $size
+                   else .text += $char | .size += $size end)
+            | .lines + [.text];
+        def wordwrap($limit):
+            reduce (split(" ")[]) as $word ({lines: [], text: ""};
+                (.text + (if .text == "" then "" else " " end) + $word) as $next
+                | if ($next | width) <= $limit then .text = $next
+                  else (if .text == "" then . else .lines += [.text] end)
+                    | ($word | wrap($limit)) as $parts
+                    | .lines += $parts[0:-1] | .text = $parts[-1] end)
+            | .lines + [.text];
+        def pad($size; $right):
+            . as $text | (" " * ([$size - width, 0] | max)) as $space
+            | if $right then $space + $text else $text + $space end;
+        def fit($size; $right):
+            (if width > $size then (wrap($size - 1)[0] + "…") else . end)
+            | pad($size; $right);
+        def bytes:
+            if . == null then "unavailable"
+            else . as $value
+                | [0, 1, 2, 3, 4, 5, 6]
+                | map(select($value >= pow(1024; .))) | (last // 0) as $unit
+                | (($value / pow(1024; $unit) * 10 | round) / 10 | tostring)
+                  + " " + ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"][$unit]
+            end;
+        def duration:
+            if . == null then "unknown" else floor as $s
+                | "\($s / 86400 | floor)d \(($s % 86400) / 3600 | floor)h \(($s % 3600) / 60 | floor)m \($s % 60)s" end;
+JQ
+}
+
+list_interface_status() {
+    jq -r --arg columns "$(terminal_columns)" \
+        --argjson summary "${1:-true}" --argjson menu "${2:-false}" \
+        --arg green "$GREEN" --arg yellow "$YELLOW" --arg dim "$DIM" --arg reset "$RESET" "$(table_format_filter)"'
+        def status_color:
+            if $menu then ""
+            elif . == "connected" or . == "link up" then $green
+            elif . == "disconnected" or . == "link down" then $yellow
+            else $dim end;
+        ($columns | tonumber | if . < 20 then 20 else . end | . - (if $menu then 4 else 0 end)) as $screen
+        | . as $router
+        | (if $summary then [
+            {label: "Router", value: .router},
+            {label: "KeenDNS", value: (if .keendns == null then "unavailable"
+                elif .keendns.hostname == null then "not configured"
+                else .keendns.hostname + (if .keendns.access == null then "" else " (" + .keendns.access + ")" end) end)},
+            {label: "Connected clients", value: (if .clients == null then "unavailable"
+             else "\(.clients.connected) (\(.clients.wired) wired / \(.clients.wireless) wireless)" end)}
+          ] as $info
+          | ([$info[].label | width] + [11] | max) as $label_width
+          | if $screen >= 40 then
+              $dim + ("ROUTER INFO" | pad($label_width; false)) + "  VALUE" + $reset,
+              ($info[] | .label as $label
+                | (.value | clean | wordwrap($screen - $label_width - 2))
+                | to_entries[]
+                | ((if .key == 0 then $label else "" end) | pad($label_width; false))
+                  + "  " + .value)
+            else
+              $dim + "ROUTER INFO" + $reset,
+              ($info[] | .label, (.value | clean | wordwrap($screen - 2)[] | "  " + .))
+            end else empty end),
+          ($router |
+        [.interfaces | to_entries[] | .key as $index | .value | {
+            index: $index, vpn, status,
+            name: ([.id, (.description | select(length > 0)),
+                    (if .type == "" then empty else "[" + .type + "]" end)] | join(" ") | clean),
+            addresses: (([.ipv4 // empty] + [.ipv6[] | .address +
+                (if .prefix_length == null then "" else "/" + (.prefix_length | tostring) end)])
+                | if length == 0 then ["-"] else . end | map(clean)),
+            rx: (.traffic.rx_bytes | bytes), tx: (.traffic.tx_bytes | bytes)
+        }] as $rows
+        | ($screen >= 72) as $wide
+        | ([$rows[].status | width] + [6] | max) as $status_width
+        | ([$rows[].rx | width] + [2] | max) as $rx_width
+        | ([$rows[].tx | width] + [2] | max) as $tx_width
+        | ($screen - $status_width - $rx_width - $tx_width - 8) as $remaining
+        | ([$remaining * 0.5 | floor, 10] | max) as $ip_width
+        | (if $wide then $remaining - $ip_width else $screen - $status_width - 2 end) as $name_width
+        | def line($name; $status; $ip; $rx; $tx; $color):
+            ($name | fit($name_width; false)) + "  "
+            + $color + ($status | fit($status_width; false)) + (if $color == "" then "" else $reset end)
+            + (if $wide then "  " + ($ip | fit($ip_width; false))
+                + "  " + ($rx | fit($rx_width; true)) + "  " + ($tx | fit($tx_width; true)) else "" end);
+        if $menu then
+            $rows[] | (.index | tostring) + "\t"
+                + line(.name; .status; (.addresses | join(", ")); .rx; .tx; "")
+        else (true, false) as $vpn
+        | (if $summary or ($vpn | not) then "" else empty end),
+          ((if $vpn then "VPN / proxy interfaces" else "Other interfaces" end) | wordwrap($screen)[]),
+          ([$rows[] | select(.vpn == $vpn)] as $section
+            | if $section | length == 0 then "  None"
+              else $dim + line("INTERFACE / NAME"; "STATUS"; "IP ADDRESS"; "RX"; "TX"; "") + $reset,
+                ($section[] |
+                    line(.name; .status; (.addresses | join(", ")); .rx; .tx; (.status | status_color)),
+                    (if $wide then empty else
+                        ((.addresses | join(", ")), ("RX " + .rx + " / TX " + .tx))
+                        | wordwrap($screen - 2)[] | "  " + .
+                     end))
+              end) end
+          )
+    ' "$TMP_DIR/status.json"
+}
+
 fetch_router_state() {
     api_get /rci/show/ip/hotspot/host "$TMP_DIR/clients.json" 'clients' array
     api_get /rci/show/rc/ip/hotspot/host "$TMP_DIR/assignments.json" 'client policies' array
@@ -845,12 +1640,6 @@ compute_client_widths() {
     ((CLIENT_NAME_WIDTH <= 36)) || CLIENT_NAME_WIDTH=36
 }
 
-separator() {
-    local width=$1 value
-    printf -v value '%*s' "$width" ''
-    printf '%s' "${value// /-}"
-}
-
 # shellcheck disable=SC2016 # The dollar expression belongs to jq.
 policy_label_filter='
     if .deny then
@@ -870,40 +1659,42 @@ list_clients_table() {
         printf '%s\n' "$empty_message"
         return 0
     fi
-    local display_name name ip mac policy online fitted_name fitted_ip fitted_policy
-    local name_separator ip_separator policy_separator
-    compute_client_widths 0
-    name_separator=$(separator "$CLIENT_NAME_WIDTH")
-    ip_separator=$(separator "$CLIENT_IP_WIDTH")
-    policy_separator=$(separator "$CLIENT_POLICY_WIDTH")
-
-    printf "%-${CLIENT_NAME_WIDTH}s %-${CLIENT_IP_WIDTH}s %-${CLIENT_POLICY_WIDTH}s\n" \
-        'NAME' 'IP' 'POLICY'
-    printf "%-${CLIENT_NAME_WIDTH}s %-${CLIENT_IP_WIDTH}s %-${CLIENT_POLICY_WIDTH}s\n" \
-        "$name_separator" "$ip_separator" "$policy_separator"
-    while IFS=$'\t' read -r name ip mac policy online; do
-        display_name=$name
-        if [[ -n $CURRENT_CLIENT_MAC && $mac == "$CURRENT_CLIENT_MAC" ]]; then
-            display_name="* $name (this device)"
-        elif [[ $online != true ]]; then
-            display_name="$name (offline)"
-        fi
-        fitted_name=$(shorten_text "$display_name" "$CLIENT_NAME_WIDTH")
-        fitted_ip=$(shorten_text "$ip" "$CLIENT_IP_WIDTH")
-        fitted_policy=$(shorten_text "$policy" "$CLIENT_POLICY_WIDTH")
-        if [[ -n $CURRENT_CLIENT_MAC && $mac == "$CURRENT_CLIENT_MAC" ]]; then
-            printf "%s%-${CLIENT_NAME_WIDTH}s %-${CLIENT_IP_WIDTH}s %-${CLIENT_POLICY_WIDTH}s%s\n" \
-                "$GREEN" "$fitted_name" "$fitted_ip" "$fitted_policy" "$RESET"
-        else
-            printf "%-${CLIENT_NAME_WIDTH}s %-${CLIENT_IP_WIDTH}s %-${CLIENT_POLICY_WIDTH}s\n" \
-                "$fitted_name" "$fitted_ip" "$fitted_policy"
-        fi
-    done < <(
-        jq -r --slurpfile policies "$TMP_DIR/policies.json" \
-            "sort_by([if .online then 0 else 1 end, (.name | ascii_downcase)])[]
-            | [.name, .ip, .mac, ($policy_label_filter), .online] | @tsv" \
-            "$TMP_DIR/connected.json"
-    )
+    jq -r --slurpfile policies "$TMP_DIR/policies.json" \
+        --arg columns "$(terminal_columns)" --arg current "$CURRENT_CLIENT_MAC" \
+        --arg green "$GREEN" --arg dim "$DIM" --arg reset "$RESET" \
+        "$(table_format_filter) def policy_label: $policy_label_filter;"'
+        ($columns | tonumber | if . < 20 then 20 else . end) as $screen
+        | [sort_by([if .online then 0 else 1 end, (.name | ascii_downcase)])[]
+            | (.mac == $current and $current != "") as $this_device
+            | {
+                name: ((if $this_device then "* " + .name + " (this device)"
+                        else .name end) | clean),
+                ip: (.ip | clean), policy: (policy_label | clean), current: $this_device,
+                status: (if .online then "online" else "offline" end)
+            }] as $rows
+        | ($screen >= 72) as $wide
+        | ($screen >= 32) as $inline_policy
+        | ([$rows[].status | width] + [6] | max) as $status_width
+        | ([$rows[].ip | width] + [10] | max | . as $natural
+            | [$natural, ($screen * 0.3 | floor)] | min) as $ip_width
+        | ([$rows[].policy | width] + [6] | max | . as $natural
+            | [$natural, ([$screen * 0.25 | floor, 6] | max)] | min) as $policy_width
+        | ([$rows[].name | width] + [4] | max | . as $natural
+            | [$natural, ($screen - $status_width - 2
+                - (if $inline_policy then $policy_width + 2 else 0 end)
+                - (if $wide then $ip_width + 2 else 0 end))]
+            | min) as $name_width
+        | def line($name; $ip; $policy; $status):
+            ($name | fit($name_width; false)) + "  "
+            + (if $wide then ($ip | fit($ip_width; false)) + "  " else "" end)
+            + (if $inline_policy then ($policy | fit($policy_width; false)) + "  " else "" end)
+            + ($status | pad($status_width; false));
+        $dim + line("NAME"; "IP ADDRESS"; "POLICY"; "STATUS") + $reset,
+        ($rows[] | (if .current then $green else "" end)
+            + line(.name; .ip; .policy; .status) + (if .current then $reset else "" end),
+            (if $wide then empty else .ip | wordwrap($screen - 2)[] | "  " + . end),
+            (if $inline_policy then empty else "Policy: " + .policy | wordwrap($screen - 2)[] | "  " + . end))
+    ' "$TMP_DIR/connected.json"
 }
 
 list_clients_json() {
@@ -922,7 +1713,9 @@ list_clients_json() {
 
 format_menu_option() {
     local index=$1 columns name ip policy status fitted_name fitted_ip fitted_policy option_width
-    if [[ $MENU_KIND == client ]]; then
+    if [[ $MENU_KIND == interface ]]; then
+        printf '%s' "${MENU_OPTIONS[index]}"
+    elif [[ $MENU_KIND == client ]]; then
         IFS=$'\t' read -r name ip policy status <<< "${MENU_OPTIONS[index]}"
         [[ $status == online ]] || name="$name (offline)"
         compute_client_widths 4
@@ -941,6 +1734,9 @@ format_menu_option() {
 
 render_arrow_menu() {
     local selected=$1 redraw=$2 count=${#MENU_OPTIONS[@]} index marker style option
+    if [[ $MENU_KIND == interface ]]; then
+        mapfile -t MENU_OPTIONS < <(list_interface_status false true | cut -f2-)
+    fi
     if $redraw; then
         printf '\033[%dA' "$count" >&2
     fi
@@ -1492,16 +2288,7 @@ undo_last_action() {
 }
 
 
-main() {
-    local answer
-    parse_args "$@"
-    init_colors
-
-    if $DISCOVER; then
-        discover_router
-        return 0
-    fi
-
+prepare_session() {
     require_command curl
     require_command jq
     command -v md5sum >/dev/null 2>&1 || command -v md5 >/dev/null 2>&1 \
@@ -1509,18 +2296,520 @@ main() {
     command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 \
         || fail 'required SHA-256 tool not found: install sha256sum or shasum'
     create_temp_dir
+}
 
-    if $INIT_CONFIG; then
+setup_main() {
+    if $DISCOVER; then
+        discover_router
+    else
+        prepare_session
         init_config
+    fi
+}
+
+start_router_session() {
+    if ! $SESSION_READY; then
+        prepare_session
+        load_config
+        SESSION_READY=true
+    fi
+    authenticate
+}
+
+read_optional_json() {
+    local endpoint=$1 file=$2 kind=$3 label=$4
+    http_request GET "$endpoint" "$file"
+    if [[ $HTTP_STATUS == 401 || $HTTP_STATUS == 403 ]]; then response_error "failed to retrieve $label" "$file"; fi
+    if [[ $HTTP_STATUS != 200 ]] || ! jq -e --arg kind "$kind" \
+        'type == $kind and (any(.. | objects; .status? == "error") | not)' "$file" >/dev/null 2>&1; then
+        warn "$label unavailable (HTTP $HTTP_STATUS)."
+        printf 'null\n' > "$file"
+    fi
+}
+
+report_format_filter() {
+    cat <<'JQ'
+        def text: if . == null then "unknown" elif type == "boolean" then (if . then "yes" else "no" end) else tostring end | clean;
+        def number: if type == "number" or type == "string" then (try tonumber catch null) else null end;
+        def nonnegative: number | if . != null and . >= 0 then . else null end;
+        ($columns | tonumber | if . < 20 then 20 else . end) as $screen
+        | def fields($title; $rows):
+            ($title | clean | wordwrap($screen)[]),
+            (($rows | map(.[0] | width) | max // 0) as $natural
+             | ([$natural, 22] | min) as $label_width
+             | $rows[] | (.[0] | clean) as $label | (.[1] | text) as $value
+             | if $screen < 40 then $dim + $label + $reset, ($value | wordwrap($screen - 2)[] | "  " + .)
+               else ($value | wordwrap($screen - $label_width - 2) | to_entries[])
+                 | $dim + ((if .key == 0 then $label else "" end) | fit($label_width; false)) + $reset + "  " + .value end);
+          def grid($title; $headers; $data):
+            ($title | clean | wordwrap($screen)[]),
+            (if $data | length == 0 then "None"
+             else ($data | map(map(text))) as $rows
+               | ($headers | length) as $n
+               | if $screen < 72 then
+                   $rows[] | . as $row
+                   | ($row[0] | wordwrap($screen)[]),
+                     (range(1; $n) as $i | ($headers[$i] + ": " + $row[$i]) | wordwrap($screen - 2)[] | "  " + .)
+                 else
+                   [range(0; $n) as $i | ([$headers[$i] | width] + [$rows[] | .[$i] | width] | max)
+                      | [., 40] | min] as $natural
+                   | ([($natural | add) - ($screen - 2 * ($n - 1)), 0] | max) as $excess
+                   | (reduce range(0; $excess) as $step ($natural;
+                        max as $largest | index($largest) as $i | .[$i] -= 1)) as $widths
+                   | def line($row): [range(0; $n) as $i | $row[$i] | fit($widths[$i]; false)] | join("  ");
+                   $dim + line($headers) + $reset, ($rows[] | line(.))
+                 end
+             end);
+JQ
+}
+
+render_report() {
+    local file=$1 filter=$2
+    if $JSON_OUTPUT; then cat "$file"; return; fi
+    jq -r --arg columns "$(terminal_columns)" --arg dim "$DIM" --arg reset "$RESET" \
+        "$(table_format_filter) $(report_format_filter) $filter" "$file"
+}
+
+system_main() {
+    start_router_session
+    api_get /rci/show/system "$TMP_DIR/system-raw.json" 'system health' object
+    read_optional_json /rci/show/version "$TMP_DIR/version.json" object 'Firmware metadata'
+    if ! jq --arg router "$ROUTER_URL" --slurpfile version "$TMP_DIR/version.json" '
+        def num: if type == "number" or type == "string" then (try tonumber catch null) else null end;
+        def kb: num | if . != null and . >= 0 then . * 1024 else null end;
+        def text: if type == "string" then . else null end;
+        if (has("uptime") or has("cpuload") or has("memory") | not)
+            or any(.. | objects; .status? == "error") then error("invalid system data") else . end
+        | ((.memory | text // "") | split("/")) as $memory
+        | {router:$router, hostname:(.hostname | text), model:($version[0].model | text),
+           firmware:($version[0].title | text), uptime_seconds:(.uptime | num), cpu_percent:(.cpuload | num),
+           memory:{used_bytes:($memory[0] | kb), total_bytes:((.memtotal // $memory[1]) | kb),
+                   free_bytes:(.memfree | kb), cached_bytes:(.memcache | kb)},
+           swap:{total_bytes:(.swaptotal | kb), free_bytes:(.swapfree | kb)},
+           connections:{capacity:(.conntotal | num), used:(if (.conntotal | num) != null and (.connfree | num) != null
+                then (.conntotal | num) - (.connfree | num) else null end)}}
+    ' "$TMP_DIR/system-raw.json" > "$TMP_DIR/system.json"; then fail 'the router returned invalid system health data'; fi
+    render_report "$TMP_DIR/system.json" '
+        fields("Router health"; [["Model",.model],["Firmware",.firmware],["Hostname",.hostname],
+            ["Uptime",(.uptime_seconds | duration)],["CPU",((.cpu_percent | text) + "%")],
+            ["RAM used / total",((.memory.used_bytes | bytes) + " / " + (.memory.total_bytes | bytes))],
+            ["RAM free",(.memory.free_bytes | bytes)],["RAM cached",(.memory.cached_bytes | bytes)],
+            ["Swap free / total",((.swap.free_bytes | bytes) + " / " + (.swap.total_bytes | bytes))],
+            ["Connections",((.connections.used | text) + " / " + (.connections.capacity | text))]])'
+}
+
+vpn_main() {
+    start_router_session
+    api_get /rci/show/interface "$TMP_DIR/vpn-raw.json" 'VPN interfaces' object
+    if ! jq --arg router "$ROUTER_URL" '
+        def num: if type == "number" or type == "string" then (try tonumber catch null) else null end;
+        def text: if type == "string" then . else null end;
+        if any(.[]; type != "object") or any(.. | objects; .status? == "error") then error("invalid interface") else . end
+        | {router:$router, peers:[to_entries[] | .key as $id | .value
+            | select((.type // "") | test("wireguard";"i")) | . as $interface
+            | (.wireguard.peer // []) | if type != "array" then error("invalid WireGuard peers") else . end
+            | to_entries[] | .key as $index | .value
+            | if type != "object" then error("invalid peer") else . end
+            | {interface:($interface.id // $id), interface_description:($interface.description | text),
+               peer:(.description | text | select(length > 0)) // ("Peer " + (($index + 1) | tostring)),
+               public_key:(."public-key" | text), endpoint_address:(."remote-endpoint-address" | text),
+               endpoint_port:(."remote-port" | num), via:(.via | text),
+               handshake_age_seconds:(."last-handshake" | num), rx_bytes:(.rxbytes | num), tx_bytes:(.txbytes | num),
+               status:(if .enabled == false or $interface.state == "down" then "disabled"
+                       elif .online == true then "online" elif .online == false then "offline" else "unknown" end)}]}
+    ' "$TMP_DIR/vpn-raw.json" > "$TMP_DIR/vpn.json"; then fail 'the router returned invalid WireGuard peer data'; fi
+    render_report "$TMP_DIR/vpn.json" '
+        grid("WireGuard peers"; ["INTERFACE","PEER","ENDPOINT","HANDSHAKE","RX","TX","STATUS"];
+            [.peers[] | [.interface,.peer,
+                (if .endpoint_address == null then null else
+                    (if .endpoint_address | contains(":") then "[" + .endpoint_address + "]" else .endpoint_address end)
+                    + (if .endpoint_port == null then "" else ":" + (.endpoint_port | tostring) end) end),
+                (if .handshake_age_seconds == null then null else (.handshake_age_seconds | tostring) + "s ago" end),
+                (.rx_bytes | bytes),(.tx_bytes | bytes),.status]])'
+}
+
+wifi_monitor_main() {
+    local id encoded
+    api_get /rci/show/interface "$TMP_DIR/monitor-interfaces.json" 'Wi-Fi radios' object
+    if ! jq --arg view "$VIEW_MODE" '
+        if any(.[]; type != "object") then error("invalid interface") else . end
+        | [to_entries[] | .key as $key | .value | select(.type == "WifiMaster")
+            | select($view == "all" or .state != "down")
+            | {id:(.id // $key),channel:(.channel // null),width_mhz:(.bandwidth // null),state:(.state // "unknown")}]
+    ' "$TMP_DIR/monitor-interfaces.json" > "$TMP_DIR/radios.json"; then fail 'invalid Wi-Fi radio data'; fi
+    printf '[]\n' > "$TMP_DIR/radio-loads.json"
+    while IFS= read -r id; do
+        encoded=$(jq -rn --arg id "$id" '$id | @uri')
+        read_optional_json "/rci/show/interface/channel-utilization/rrd?name=$encoded&attribute=load&detail=0" \
+            "$TMP_DIR/radio-load.json" object "Channel utilization for $id"
+        jq --arg id "$id" --slurpfile sample "$TMP_DIR/radio-load.json" '
+            def num: if type == "number" or type == "string" then (try tonumber catch null) else null end;
+            (if ($sample[0].data | type) == "array" then [$sample[0].data[] | select(type == "object")
+                | {t:(.t | num),v:(.v | num)} | select(.t != null and .v != null and .v >= 0 and .v <= 100)] else [] end) as $data
+            | ($data | map(.t) | max) as $latest
+            | [$data[] | select(.t > $latest - 180)] as $window
+            | . + [{id:$id, samples:($window | length), current_percent:($window | max_by(.t) | .v),
+                average_percent:(if $window | length > 0 then (($window | map(.v) | add) / ($window | length) * 10 | round) / 10 else null end),
+                peak_percent:($window | map(.v) | max)}]
+        ' "$TMP_DIR/radio-loads.json" > "$TMP_DIR/radio-loads-next.json"
+        mv "$TMP_DIR/radio-loads-next.json" "$TMP_DIR/radio-loads.json"
+    done < <(jq -r '.[].id' "$TMP_DIR/radios.json")
+    jq --arg router "$ROUTER_URL" --slurpfile loads "$TMP_DIR/radio-loads.json" '
+        ($loads[0] | map({key:.id,value:.}) | from_entries) as $by_id
+        | {router:$router,window_seconds:180,radios:map(. + $by_id[.id])}
+    ' "$TMP_DIR/radios.json" > "$TMP_DIR/wifi-monitor.json"
+    render_report "$TMP_DIR/wifi-monitor.json" '
+        grid("Wi-Fi channel utilization · last 3 minutes"; ["RADIO","CH","WIDTH MHz","NOW %","AVG %","PEAK %","STATE"];
+            [.radios[] | [.id,.channel,.width_mhz,.current_percent,.average_percent,.peak_percent,.state]])'
+}
+
+clients_main() {
+    start_router_session
+    if [[ $SUBCOMMAND != inspect ]]; then
+        fetch_router_state; detect_current_client
+        if $JSON_OUTPUT; then list_clients_json; else list_clients_table; fi
+        return
+    fi
+    VIEW_MODE=all
+    fetch_router_state
+    local matches count mac
+    matches=$(jq --arg query "$INSPECT_QUERY" '[.[] | select(.ip == $query or .mac == ($query | ascii_downcase)
+        or (.name | ascii_downcase) == ($query | ascii_downcase))] | unique_by(.mac)' "$TMP_DIR/all-clients.json")
+    count=$(jq 'length' <<< "$matches")
+    ((count > 0)) || fail "$EXIT_CLIENT" "no client matches $INSPECT_QUERY"
+    ((count == 1)) || fail "$EXIT_CLIENT" 'client name is ambiguous; use its IP or MAC address'
+    SELECTED_CLIENT=$(jq -c '.[0]' <<< "$matches")
+    mac=$(jq -r '.mac' <<< "$SELECTED_CLIENT")
+    read_optional_json '/rci/show/ip/hotspot/summary?detail=0&attribute=sumbytes' "$TMP_DIR/inspect-traffic.json" object 'Recent client traffic'
+    read_optional_json /rci/show/interface "$TMP_DIR/inspect-interfaces.json" object 'Client radio details'
+    jq --arg router "$ROUTER_URL" --arg mac "$mac" --argjson client "$SELECTED_CLIENT" \
+        --slurpfile traffic "$TMP_DIR/inspect-traffic.json" --slurpfile interfaces "$TMP_DIR/inspect-interfaces.json" \
+        --slurpfile policies "$TMP_DIR/policies.json" "def policy_label: $policy_label_filter;"'
+        def text: if type == "string" then . else null end;
+        def num: if type == "number" or type == "string" then (try tonumber catch null) else null end;
+        (first(.[] | select((.mac | ascii_downcase) == $mac)) // {}) as $host
+        | (($host.ap // $host.mws.ap) | text) as $ap
+        | ($ap // "" | split("/")[0]) as $radio_id
+        | ((if $traffic[0].t == 0 and ($traffic[0].host | type) == "array" then
+              first($traffic[0].host[] | select((.mac // "" | ascii_downcase) == $mac)) else null end) // null) as $usage
+        | {router:$router, client:($client | {name,ip,mac,online,blocked:.deny,policy:policy_label,
+            policy_id:(if .policy == false then null else .policy end)}
+            + {hostname:($host.hostname | text), connection:(if $ap != null or ($host.ssid | type) == "string" then "wireless" else "wired" end),
+               interface:($host.interface.id | text), ap:$ap, ssid:($host.ssid // $host.mws.ssid | text),
+               signal_dbm:($host.rssi // $host.mws.rssi | num), tx_rate_mbps:($host.txrate | num), rx_rate_mbps:($host.rxrate | num),
+               uptime_seconds:($host.uptime | num), channel:($interfaces[0][$radio_id].channel // null),
+               band:($interfaces[0][$radio_id] as $radio
+                   | if $radio.band != null then ($radio.band | tostring)
+                     elif (($radio.frequency | num) // 0) >= 5925 then "6 GHz"
+                     elif (($radio.frequency | num) // 0) >= 4900 then "5 GHz"
+                     elif $radio_id == "WifiMaster0" then "2.4 GHz"
+                     elif $radio_id == "WifiMaster1" then "5 GHz" else null end),
+               recent_traffic:(if $usage == null then null else {window_seconds:180,rx_bytes:($usage.rxbytes | num),
+                   tx_bytes:($usage.txbytes | num),total_bytes:($usage.sumbytes | num)} end)})}
+    ' "$TMP_DIR/clients.json" > "$TMP_DIR/client-inspect.json"
+    render_report "$TMP_DIR/client-inspect.json" '
+        .client | fields("Client details"; [["Name",.name],["IP",.ip],["MAC",.mac],["Hostname",.hostname],
+            ["Status",(if .online then "online" else "offline" end)],["Connection",.connection],["Policy",.policy],["Blocked",.blocked],
+            ["Interface",.interface],["Access point",.ap],["SSID",.ssid],["Band",.band],["Channel",.channel],
+            ["Signal dBm",.signal_dbm],["TX Mbps",.tx_rate_mbps],["RX Mbps",.rx_rate_mbps],["Connected for",(.uptime_seconds | duration)],
+            ["Traffic · 3 minutes",((.recent_traffic.rx_bytes | bytes) + " RX / " + (.recent_traffic.tx_bytes | bytes) + " TX")]])'
+}
+
+inspect_policy() {
+    resolve_policy "$INSPECT_QUERY"
+    api_get /rci/show/interface "$TMP_DIR/policy-interfaces.json" 'policy interface status' object
+    jq --arg router "$ROUTER_URL" --arg id "$SELECTED_POLICY_ID" --arg name "$SELECTED_POLICY_LABEL" \
+        --slurpfile interfaces "$TMP_DIR/policy-interfaces.json" --slurpfile clients "$TMP_DIR/all-clients.json" '
+        ($interfaces[0] | to_entries | map({key:(.value.id // .key),value:.value}) | from_entries) as $by_id
+        | (if $id == "__default__" then [$by_id | to_entries[] | select(.value.global == true)
+                | {interface:.key,enabled:true,priority:(.value.priority // null)}] | sort_by(-(.priority // 0))
+           else .[$id].permit // [] end) as $permits
+        | {router:$router,id:(if $id == "__default__" then null else $id end),name:$name,
+           interfaces:[$permits | to_entries[] | .key as $order | .value
+               | {id:.interface,order:($order+1),enabled:(.enabled != false and .no != true),
+                  priority:(.priority // $by_id[.interface].priority // null),
+                  priority_source:(if .priority != null and $id != "__default__" then "policy" else "interface" end),
+                  status:($by_id[.interface] | if .state == "down" then "disabled" elif .connected == "yes" or .connected == true
+                    then "connected" elif .link == "up" then "link up" elif .link == "down" then "link down" else "unknown" end)}],
+           clients:[$clients[0][] | select(if $id == "__default__" then .policy == null or .policy == false else .policy == $id end)
+               | {name,ip,mac,online,blocked:.deny}]}
+    ' "$TMP_DIR/policies.json" > "$TMP_DIR/policy-inspect.json"
+    render_report "$TMP_DIR/policy-inspect.json" '
+        fields("Policy details"; [["Name",.name],["ID",(.id // "Default")]]),"",
+        grid("Interfaces"; ["ORDER","INTERFACE","ENABLED","PRIORITY","STATUS"];
+            [.interfaces[] | [.order,.id,.enabled,.priority,.status]]),"",
+        grid("Assigned clients"; ["NAME","IP","STATUS","BLOCKED"];
+            [.clients[] | [.name,.ip,(if .online then "online" else "offline" end),.blocked]])'
+}
+
+fetch_logs() {
+    local payload
+    payload=$(jq -nc --argjson limit "$LOG_LIMIT" '{"max-lines":$limit,once:true}')
+    http_request POST /rci/show/log "$TMP_DIR/log-raw.json" "$payload"
+    [[ $HTTP_STATUS == 200 ]] || response_error 'failed to retrieve router logs' "$TMP_DIR/log-raw.json"
+    if ! jq --arg router "$ROUTER_URL" --arg filter "$LOG_FILTER" '
+        if (.log | type) != "object" or any(.. | objects; .status? == "error") then error("invalid log data") else . end
+        | {router:$router,entries:[.log | to_entries[] | .value
+            | {id:.id,timestamp:.timestamp,level:.message.level,source:.ident,message:.message.message}
+            | select((.message | type) == "string")
+            | select($filter == "" or ((.message + " " + (.source // "")) | ascii_downcase | contains($filter | ascii_downcase)))]
+            | sort_by(.id)}
+    ' "$TMP_DIR/log-raw.json" > "$TMP_DIR/logs.json"; then fail 'the router returned invalid log data'; fi
+}
+
+logs_main() {
+    start_router_session
+    fetch_logs
+    render_report "$TMP_DIR/logs.json" '
+        grid("Router logs"; ["TIME","LEVEL","SOURCE","MESSAGE"];
+            [.entries[] | [.timestamp,.level,.source,.message]])'
+}
+
+run_diagnostic_test() {
+    local kind=$1 payload=$2 endpoint="/rci/tools/$1" started=$SECONDS remaining
+    printf '[]\n' > "$TMP_DIR/diagnostic-lines.json"
+    http_request POST "$endpoint" "$TMP_DIR/diagnostic-chunk.json" "$payload"
+    [[ $HTTP_STATUS == 200 ]] || response_error "failed to start $kind" "$TMP_DIR/diagnostic-chunk.json"
+    DIAG_ACTIVE_ENDPOINT=$endpoint
+    while true; do
+        if ! jq -e 'type == "object" and (any(.. | objects; .status? == "error") | not)
+            and ((.message // []) | type == "array" and all(.[]; type == "string"))' \
+            "$TMP_DIR/diagnostic-chunk.json" >/dev/null 2>&1; then
+            fail "router returned an invalid $kind response"
+        fi
+        jq --slurpfile chunk "$TMP_DIR/diagnostic-chunk.json" '. + ($chunk[0].message // [])' \
+            "$TMP_DIR/diagnostic-lines.json" > "$TMP_DIR/diagnostic-lines-next.json"
+        mv "$TMP_DIR/diagnostic-lines-next.json" "$TMP_DIR/diagnostic-lines.json"
+        if ! jq -e 'has("continued") and .continued != false and .continued != null' "$TMP_DIR/diagnostic-chunk.json" >/dev/null; then
+            DIAG_ACTIVE_ENDPOINT=
+            break
+        fi
+        DIAG_ACTIVE_ENDPOINT=$endpoint
+        ((SECONDS - started < 60)) || fail "$kind exceeded its 60-second time limit"
+        sleep 0.5 &
+        WATCH_SLEEP_PID=$!
+        wait "$WATCH_SLEEP_PID"
+        WATCH_SLEEP_PID=
+        remaining=$((60 - (SECONDS - started)))
+        ((remaining > 0)) || fail "$kind exceeded its 60-second time limit"
+        HTTP_TIMEOUT=$remaining http_request GET "$endpoint" "$TMP_DIR/diagnostic-chunk.json"
+        [[ $HTTP_STATUS == 200 ]] || response_error "failed to poll $kind" "$TMP_DIR/diagnostic-chunk.json"
+    done
+    jq --arg kind "$kind" --slurpfile lines "$TMP_DIR/diagnostic-lines.json" \
+        '. + [{test:$kind,completed:true,lines:$lines[0]}]' "$TMP_DIR/diagnostics-tests.json" > "$TMP_DIR/diagnostics-tests-next.json"
+    mv "$TMP_DIR/diagnostics-tests-next.json" "$TMP_DIR/diagnostics-tests.json"
+}
+
+diagnose_main() {
+    local payload ping=ping
+    start_router_session
+    if [[ -n $DIAG_INTERFACE ]]; then
+        VIEW_MODE=all
+        fetch_interface_status
+        jq -e --arg id "$DIAG_INTERFACE" 'any(.interfaces[]; .id == $id)' "$TMP_DIR/status.json" >/dev/null \
+            || fail "$EXIT_USAGE" "unknown diagnostic source interface: $DIAG_INTERFACE"
+    fi
+    [[ $DIAG_HOST != *:* ]] || ping=ping6
+    printf '[]\n' > "$TMP_DIR/diagnostics-tests.json"
+    payload=$(jq -nc --arg host "$DIAG_HOST" --arg source "$DIAG_INTERFACE" \
+        '{host:$host,count:4} + (if $source == "" then {} else {source:$source} end)')
+    $QUIET || printf 'Running %s from the router to %s...\n' "$ping" "$DIAG_HOST" >&2
+    run_diagnostic_test "$ping" "$payload"
+    payload=$(jq -nc --arg host "$DIAG_HOST" --arg source "$DIAG_INTERFACE" \
+        '{host:$host,"max-ttl":12,count:1,"wait-time":1} + (if $source == "" then {} else {"source-interface":$source} end)')
+    $QUIET || printf 'Running traceroute from the router...\n' >&2
+    run_diagnostic_test traceroute "$payload"
+    # Logs are supplementary; a missing log API must not discard diagnostic output.
+    payload=$(jq -nc --argjson limit "$LOG_LIMIT" '{"max-lines":$limit,once:true}')
+    http_request POST /rci/show/log "$TMP_DIR/diagnostic-logs.json" "$payload"
+    if [[ $HTTP_STATUS != 200 ]] || ! jq -e '(.log | type) == "object"' "$TMP_DIR/diagnostic-logs.json" >/dev/null 2>&1; then
+        warn "Diagnostic logs unavailable (HTTP $HTTP_STATUS)."
+        printf 'null\n' > "$TMP_DIR/diagnostic-logs.json"
+    fi
+    jq --arg router "$ROUTER_URL" --arg host "$DIAG_HOST" --arg source "$DIAG_INTERFACE" \
+        --slurpfile logs "$TMP_DIR/diagnostic-logs.json" '
+        {router:$router,host:$host,source_interface:(if $source == "" then null else $source end),tests:.,
+         logs:(if $logs[0] == null then null else [$logs[0].log[]
+            | select(.message.level == "Error" or (.message.message | contains($host))
+                or ($source != "" and (.message.message | contains($source))))
+            | {timestamp,level:.message.level,source:.ident,message:.message.message}] end)}
+    ' "$TMP_DIR/diagnostics-tests.json" > "$TMP_DIR/diagnose.json"
+    # shellcheck disable=SC2016 # $screen is a jq variable.
+    render_report "$TMP_DIR/diagnose.json" '
+        fields("Connection diagnostics"; [["Target",.host],["Source",(.source_interface // "router default")]]),
+        (.tests[] | "",.test, (.lines[] | clean | wordwrap($screen)[])),"",
+        (if .logs == null then "Recent logs unavailable" else
+            grid("Relevant recent logs"; ["TIME","LEVEL","SOURCE","MESSAGE"];
+                [.logs[] | [.timestamp,.level,.source,.message]]) end)'
+}
+
+status_main() {
+    start_router_session
+    fetch_interface_status
+    fetch_status_details
+    fetch_client_summary
+    if $JSON_OUTPUT; then
+        cat "$TMP_DIR/status.json"
+    else
+        list_interface_status
+    fi
+}
+
+select_interface_interactively() {
+    local count selected selected_index
+    count=$(jq '.interfaces | length' "$TMP_DIR/status.json")
+    if ((count == 0)); then
+        unchanged 'No interfaces found.'
+        return 1
+    fi
+    if command -v "$FZF_COMMAND" >/dev/null 2>&1; then
+        selected=$(list_interface_status false true \
+            | "$FZF_COMMAND" --delimiter=$'\t' --with-nth=2.. --height=70% --layout=reverse \
+                --prompt='Interface> ' --header='Select interface (including inactive interfaces)') || {
+            unchanged 'No changes made.'
+            return 1
+        }
+        selected_index=${selected%%$'\t'*}
+        if ! { [[ $selected_index =~ ^(0|[1-9][0-9]{0,5})$ ]] && ((selected_index < count)); }; then
+            fail 'fzf returned an unknown interface selection'
+        fi
+    else
+        MENU_KIND=interface
+        MENU_CURRENT_INDEX=-1
+        mapfile -t MENU_OPTIONS < <(list_interface_status false true | cut -f2-)
+        printf 'Select interface (including inactive interfaces)\n\n' >&2
+        if ! arrow_menu interface; then
+            unchanged 'No changes made.'
+            return 1
+        fi
+        selected_index=$((SELECTED_INDEX - 1))
+    fi
+    SELECTED_INTERFACE=$(jq -c --argjson index "$selected_index" '.interfaces[$index]' "$TMP_DIR/status.json")
+}
+
+choose_interface_action() {
+    local heading selected
+    heading=$(jq -r '"Interface: " + .id + " | Status: " + .status | gsub("[[:cntrl:]]"; " ")' <<< "$SELECTED_INTERFACE")
+    if command -v "$FZF_COMMAND" >/dev/null 2>&1; then
+        selected=$(printf 'up\tConnect (enable)\ndown\tDisconnect (disable)\ncancel\tCancel\n' \
+            | "$FZF_COMMAND" --delimiter=$'\t' --with-nth=2.. --height=70% --layout=reverse \
+                --prompt='Action> ' --header="$heading") || {
+            unchanged 'No changes made.'
+            return 1
+        }
+        SELECTED_INTERFACE_ACTION=${selected%%$'\t'*}
+    else
+        MENU_KIND=interface-action
+        MENU_CURRENT_INDEX=-1
+        MENU_OPTIONS=('Connect (enable)' 'Disconnect (disable)' 'Cancel')
+        printf '%s\n\n' "$heading" >&2
+        if ! arrow_menu action; then
+            unchanged 'No changes made.'
+            return 1
+        fi
+        case $SELECTED_INDEX in
+            1) SELECTED_INTERFACE_ACTION=up ;;
+            2) SELECTED_INTERFACE_ACTION=down ;;
+            3) SELECTED_INTERFACE_ACTION=cancel ;;
+        esac
+    fi
+    case $SELECTED_INTERFACE_ACTION in
+        up|down) ;;
+        cancel) unchanged 'No changes made.'; return 1 ;;
+        *) fail 'fzf returned an unknown interface action' ;;
+    esac
+}
+
+apply_interface_action() {
+    local id label action=$SELECTED_INTERFACE_ACTION current payload attempt status
+    id=$(jq -r '.id' <<< "$SELECTED_INTERFACE")
+    label=$(jq -r '.id | gsub("[[:cntrl:]]"; " ")' <<< "$SELECTED_INTERFACE")
+    # Refresh before writing: never create an interface that disappeared after selection.
+    fetch_interface_status
+    current=$(jq -c --arg id "$id" 'first(.interfaces[] | select(.id == $id)) // empty' "$TMP_DIR/status.json")
+    [[ -n $current ]] || fail "interface $label is no longer available; no changes made"
+    if $DRY_RUN; then
+        printf 'Would set interface %s administratively %s (current status: %s).\n' \
+            "$label" "$action" "$(jq -r '.status' <<< "$current")"
         return 0
     fi
+    if [[ $(jq -r '.state' <<< "$current") == "$action" ]]; then
+        unchanged "Interface $label is already administratively $action (status: $(jq -r '.status' <<< "$current"))."
+        return 0
+    fi
+    # Structured RCI command; names with slashes remain a single interface key.
+    payload=$(jq -nc --arg id "$id" --arg action "$action" \
+        '{interface:{($id):{up:(if $action == "up" then true else {no:true} end)}}}')
+    OPERATION_CONTEXT="interface $label: the requested state may have applied if router access is lost"
+    http_request POST /rci/ "$TMP_DIR/interface-result.json" "$payload"
+    [[ $HTTP_STATUS == 200 ]] || response_error 'failed to change interface state' "$TMP_DIR/interface-result.json"
+    if ! jq -e 'type == "object" and (any(.. | objects; .status? == "error") | not)' \
+        "$TMP_DIR/interface-result.json" >/dev/null 2>&1; then
+        fail 'router rejected the interface command or returned an invalid response'
+    fi
+    for attempt in 0 1 2 3; do
+        case $attempt in 1) sleep 0.2 ;; 2) sleep 0.3 ;; 3) sleep 0.5 ;; esac
+        fetch_interface_status
+        current=$(jq -c --arg id "$id" 'first(.interfaces[] | select(.id == $id)) // empty' "$TMP_DIR/status.json")
+        if [[ -n $current && $(jq -r '.state' <<< "$current") == "$action" ]]; then
+            status=$(jq -r '.status' <<< "$current")
+            OPERATION_CONTEXT=
+            success "Applied and verified interface $label administratively $action (status: $status)."
+            return 0
+        fi
+    done
+    fail "$EXIT_VERIFY" "could not verify administrative state $action after 4 checks over 1 second"
+}
 
-    load_config
-    authenticate
+interfaces_main() {
+    if $INTERACTIVE; then
+        [[ -t 0 && -t 2 ]] || fail 'interactive interface selection requires a terminal'
+        VIEW_MODE=all
+    fi
+    start_router_session
+    fetch_interface_status
+    fetch_interface_traffic
+    if $JSON_OUTPUT; then
+        cat "$TMP_DIR/status.json"
+    elif $INTERACTIVE; then
+        select_interface_interactively || return 0
+        choose_interface_action || return 0
+        apply_interface_action
+    else
+        list_interface_status false
+    fi
+}
+
+wifi_main() {
+    start_router_session
+    if [[ $SUBCOMMAND == monitor ]]; then wifi_monitor_main; return; fi
+    fetch_wifi_networks
+    if $JSON_OUTPUT; then
+        cat "$TMP_DIR/wifi.json"
+    else
+        list_wifi_networks
+    fi
+}
+
+traffic_main() {
+    start_router_session
+    fetch_client_traffic
+    if $JSON_OUTPUT; then
+        cat "$TMP_DIR/client-traffic.json"
+    else
+        list_client_traffic
+    fi
+}
+
+policy_main() {
+    local answer
+    start_router_session
     fetch_router_state
     detect_current_client
 
-    if $UNDO; then
+    if [[ $SUBCOMMAND == inspect ]]; then
+        inspect_policy
+    elif $UNDO; then
         undo_last_action
     elif $JSON_OUTPUT; then
         list_clients_json
@@ -1565,6 +2854,58 @@ main() {
     else
         list_clients_table
     fi
+}
+
+wake_main() {
+    start_router_session
+    fetch_router_state
+    preflight_clients
+    run_selected_actions
+}
+
+run_command_once() {
+    case $COMMAND in
+        root)
+            if $INIT_CONFIG || $DISCOVER; then setup_main; else status_main; fi
+            ;;
+        policy) policy_main ;;
+        interfaces) interfaces_main ;;
+        traffic) traffic_main ;;
+        wifi) wifi_main ;;
+        clients) clients_main ;;
+        system) system_main ;;
+        vpn) vpn_main ;;
+        logs) logs_main ;;
+        diagnose) diagnose_main ;;
+        wake) wake_main ;;
+    esac
+}
+
+main() {
+    parse_args "$@"
+    init_colors
+    if [[ -z $WATCH_INTERVAL ]]; then
+        run_command_once
+        return
+    fi
+    start_router_session
+    if ! $JSON_OUTPUT; then
+        WATCH_SCREEN=true
+        CURSOR_HIDDEN=true
+        printf '\033[?1049h\033[?25l'
+    fi
+    while true; do
+        run_command_once > "$TMP_DIR/watch-frame"
+        if $JSON_OUTPUT; then
+            jq -c . "$TMP_DIR/watch-frame"
+        else
+            printf '\033[H%s\033[J' "$(cat "$TMP_DIR/watch-frame")"
+        fi
+        sleep "$WATCH_INTERVAL" &
+        WATCH_SLEEP_PID=$!
+        wait "$WATCH_SLEEP_PID"
+        WATCH_SLEEP_PID=
+    done
 }
 
 main "$@"

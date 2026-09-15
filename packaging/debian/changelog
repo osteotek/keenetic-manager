@@ -1,3 +1,10 @@
+keenetic-manager (1.2.0-1) unstable; urgency=medium
+
+  * Add router status, traffic, Wi-Fi, live views, and diagnostics commands.
+  * Add client and policy inspection and interactive interface control.
+
+ -- osteotek <osteotek@users.noreply.github.com>  Tue, 15 Sep 2026 00:00:00 +0000
+
 keenetic-manager (1.1.3-1) unstable; urgency=medium
 
   * Rename the project to keenetic-manager and the command to keenetic.

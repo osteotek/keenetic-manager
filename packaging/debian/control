@@ -11,6 +11,7 @@ Package: keenetic-manager
 Architecture: all
 Depends: bash (>= 4.3), curl, jq, coreutils, ${misc:Depends}
 Recommends: fzf
-Description: manage Keenetic client network policies
- Lists router clients and applies verified connection policies, Internet
- blocks, and Wake-on-LAN actions through the Keenetic RCI API.
+Description: inspect Keenetic routers and manage client policies
+ Shows router, VPN, Wi-Fi, traffic, and client status with live views and
+ diagnostics. Applies verified client policies, Internet blocks, interface
+ state changes, and Wake-on-LAN actions through the Keenetic RCI API.
