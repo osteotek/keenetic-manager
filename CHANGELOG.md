@@ -9,6 +9,7 @@
 - Add `wifi monitor` with three-minute radio channel utilization.
 - Add `policy inspect` with ordered interfaces, priorities, state, and assigned clients.
 - Add bounded `logs` snapshots and router-side `diagnose` ping/traceroute with cancellation.
+- Cover jq 1.6 compatibility and responsive output with 44 integration checks.
 
 - Add `keenetic wifi` with SSID, band, channel/width, security, client counts, and status; support compact responsive tables, `--all`, and password-free JSON.
 - Show current online/offline/unknown status in traffic lists and expose nullable `online` in traffic JSON.

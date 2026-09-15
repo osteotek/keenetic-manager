@@ -2,7 +2,7 @@ class KeeneticManager < Formula
   desc "Inspect Keenetic routers and manage client policies"
   homepage "https://github.com/osteotek/keenetic-manager"
   url "https://github.com/osteotek/keenetic-manager/releases/download/v1.2.0/keenetic-manager-1.2.0.tar.gz"
-  sha256 "731d3daa1e89cd9caa4face156d6dcd429d7b7ceb9ef864520d0d112aa2d2915"
+  sha256 "8b35bfb959b4e2773b0b048beff248cba1a6a1ca655cf6ea4f3063e97da6ed37"
   license "MIT"
 
   depends_on "bash"

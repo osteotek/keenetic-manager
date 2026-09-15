@@ -1069,8 +1069,8 @@ fetch_interface_status() {
                 state: (.state | text),
                 link: (.link | text),
                 connected: (.connected | connection),
-                ipv4: (.address | text | select(length > 0)) // null,
-                mask: (.mask | text | select(length > 0)) // null,
+                ipv4: ((.address | text | select(length > 0)) // null),
+                mask: ((.mask | text | select(length > 0)) // null),
                 ipv6: [(.ipv6.addresses // [])[]
                     | select((.address | type) == "string" and (.address | length) > 0)
                     | {address: .address, prefix_length: (."prefix-length" // null)}]
@@ -1489,10 +1489,10 @@ list_interface_status() {
           | ([$info[].label | width] + [11] | max) as $label_width
           | if $screen >= 40 then
               $dim + ("ROUTER INFO" | pad($label_width; false)) + "  VALUE" + $reset,
-              ($info[] | .label as $label
+              ($info[] | .label as $field_label
                 | (.value | clean | wordwrap($screen - $label_width - 2))
                 | to_entries[]
-                | ((if .key == 0 then $label else "" end) | pad($label_width; false))
+                | ((if .key == 0 then $field_label else "" end) | pad($label_width; false))
                   + "  " + .value)
             else
               $dim + "ROUTER INFO" + $reset,
@@ -2337,10 +2337,10 @@ report_format_filter() {
             ($title | clean | wordwrap($screen)[]),
             (($rows | map(.[0] | width) | max // 0) as $natural
              | ([$natural, 22] | min) as $label_width
-             | $rows[] | (.[0] | clean) as $label | (.[1] | text) as $value
-             | if $screen < 40 then $dim + $label + $reset, ($value | wordwrap($screen - 2)[] | "  " + .)
+             | $rows[] | (.[0] | clean) as $field_label | (.[1] | text) as $value
+             | if $screen < 40 then $dim + $field_label + $reset, ($value | wordwrap($screen - 2)[] | "  " + .)
                else ($value | wordwrap($screen - $label_width - 2) | to_entries[])
-                 | $dim + ((if .key == 0 then $label else "" end) | fit($label_width; false)) + $reset + "  " + .value end);
+                 | $dim + ((if .key == 0 then $field_label else "" end) | fit($label_width; false)) + $reset + "  " + .value end);
           def grid($title; $headers; $data):
             ($title | clean | wordwrap($screen)[]),
             (if $data | length == 0 then "None"
@@ -2411,7 +2411,7 @@ vpn_main() {
             | to_entries[] | .key as $index | .value
             | if type != "object" then error("invalid peer") else . end
             | {interface:($interface.id // $id), interface_description:($interface.description | text),
-               peer:(.description | text | select(length > 0)) // ("Peer " + (($index + 1) | tostring)),
+               peer:((.description | text | select(length > 0)) // ("Peer " + (($index + 1) | tostring))),
                public_key:(."public-key" | text), endpoint_address:(."remote-endpoint-address" | text),
                endpoint_port:(."remote-port" | num), via:(.via | text),
                handshake_age_seconds:(."last-handshake" | num), rx_bytes:(.rxbytes | num), tx_bytes:(.txbytes | num),

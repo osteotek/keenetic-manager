@@ -8,7 +8,7 @@ A Bash CLI for Keenetic router status, clients, Wi-Fi, traffic, VPN diagnostics,
 
 - Bash 4.3 or newer
 - `curl`
-- `jq`
+- `jq` 1.6 or newer
 - `md5sum` and `sha256sum`, or the macOS `md5` and `shasum` equivalents
 - Optional: `fzf` for searchable interactive selection
 - Python 3 and OpenSSL for the regression suite
