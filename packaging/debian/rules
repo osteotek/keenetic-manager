@@ -11,3 +11,4 @@ override_dh_auto_test:
 override_dh_auto_install:
 	install -Dm755 keenetic debian/keenetic-manager/usr/bin/keenetic
 	install -Dm644 completions/keenetic.bash debian/keenetic-manager/usr/share/bash-completion/completions/keenetic
+	install -Dm644 completions/_keenetic debian/keenetic-manager/usr/share/zsh/vendor-completions/_keenetic

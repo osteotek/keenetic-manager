@@ -12,6 +12,7 @@ class KeeneticManager < Formula
   def install
     bin.install "keenetic" => "keenetic"
     bash_completion.install "completions/keenetic.bash" => "keenetic"
+    zsh_completion.install "completions/_keenetic"
   end
 
   test do

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Color status words in tables and detail views: green for online/connected/pass, yellow for offline/disconnected/not ready, red for errors and blocks, dim for unknown values.
+- Fold fields the router did not report into one dim `Not reported:` line in detail views; JSON is unchanged.
+- Add `policy set CLIENT... POLICY`, `policy block CLIENT...`, and `policy unblock CLIENT...` verb forms that detect names, IPs, and MACs.
+- List ready-to-run commands when a client name is ambiguous, and suggest the closest command for typos.
+- Ask for the password first in `--init`, with file and command sources as fallbacks; acknowledge plain HTTP once via `ROUTER_ALLOW_HTTP=true` instead of warning on every run.
+- Add hints to empty views, a header row to interactive menus, and an interval/refresh-time header to `--watch`.
+- Regroup `--help` by task, trim trailing spaces from table rows, capitalize narrow-screen labels, and dim `--verbose` debug lines.
+- Add zsh completion (`completions/_keenetic`), installed by `make install` and the packaging definitions.
+
 ## 1.3.1 - 2026-09-15
 
 - Run on macOS: re-execute under Homebrew Bash when the system Bash is older than 4.3, fall back to `ifconfig` for local device detection, and use `route` for `--discover` when `ip` is unavailable.

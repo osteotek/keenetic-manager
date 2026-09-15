@@ -39,6 +39,7 @@ ROUTER_PASSWORD_COMMAND=
 ROUTER_PASSWORD_FILE=
 ROUTER_CA_FILE=
 ROUTER_INSECURE=false
+ROUTER_ALLOW_HTTP=false
 CLI_CA_FILE=
 CLI_INSECURE=false
 ROUTER_PROFILE=
@@ -101,6 +102,7 @@ RESET=
 CLIENT_NAME_WIDTH=28
 CLIENT_IP_WIDTH=15
 CLIENT_POLICY_WIDTH=18
+declare -a COLOR_ARGS=()
 declare -a CLIENT_SELECTORS=()
 declare -a CLIENT_VALUES=()
 declare -a SELECTED_CLIENTS=()
@@ -112,45 +114,34 @@ declare -a POLICY_LABELS=()
 usage() {
     cat <<EOF
 Usage:
-  $PROGRAM [GLOBAL OPTIONS] [--all] [--json]
-  $PROGRAM [GLOBAL OPTIONS] policy [OPTIONS]
-  $PROGRAM [GLOBAL OPTIONS] interfaces [OPTIONS]
-  $PROGRAM [GLOBAL OPTIONS] traffic [OPTIONS]
-  $PROGRAM [GLOBAL OPTIONS] wifi [--all] [--json]
-  $PROGRAM [GLOBAL OPTIONS] clients [inspect NAME|IP|MAC] [OPTIONS]
-  $PROGRAM [GLOBAL OPTIONS] system [--json]
-  $PROGRAM [GLOBAL OPTIONS] system reboot [--dry-run]
-  $PROGRAM [GLOBAL OPTIONS] vpn peers [--json]
-  $PROGRAM [GLOBAL OPTIONS] diagnose HOST [--interface ID] [--json]
-  $PROGRAM [GLOBAL OPTIONS] logs [--limit N] [--filter TEXT] [--json]
-  $PROGRAM [GLOBAL OPTIONS] wan|dhcp|routes|mesh|forwards [--json] [--watch SECONDS]
-  $PROGRAM [GLOBAL OPTIONS] connections [--client NAME|IP|MAC] [--json]
-  $PROGRAM [GLOBAL OPTIONS] speedtest --server HOST [OPTIONS]
-  $PROGRAM [GLOBAL OPTIONS] wake SELECTOR... [--dry-run]
+  $PROGRAM [GLOBAL OPTIONS] [COMMAND] [COMMAND OPTIONS]
   $PROGRAM --init [--router NAME] [--ca-file FILE|--insecure]
   $PROGRAM --discover
-  $PROGRAM --help
-  $PROGRAM --version
 
-Commands:
-  (none)      Show KeenDNS, connected clients, interfaces, IP addresses, and traffic totals
-  interfaces  Inspect interfaces, sample rates, or connect/disconnect them
+Status and monitoring:
+  (none)      Router summary: KeenDNS, connected clients, interfaces, traffic totals
+  interfaces  List interfaces; inspect ID, --rates, or --interactive connect/disconnect
+  wifi        Wi-Fi networks; wifi clients, wifi scan, wifi monitor
   traffic     Rank clients by recent traffic (default: top five, last three minutes)
-  wifi        Show the router's Wi-Fi networks, radios, security, and client counts
-  clients     List, inspect, or rename clients
-  system      Show health/changes, save configuration, or reboot
-  vpn         Show WireGuard peer endpoints, handshakes, and counters
-  diagnose    Run router-side ping/traceroute and show relevant recent logs
-  logs        Show recent router logs, with optional text filtering
-  policy      List clients and manage connection policies and Internet blocks
-  wan         Show Internet health, connections, and DNS servers
-  dhcp        Show DHCP leases and static reservations
-  routes      Show IPv4 and IPv6 routes
-  mesh        Show mesh nodes and backhaul links
-  connections Show active NAT connections, optionally filtered by client
-  forwards    Show configured port-forwarding rules
-  speedtest   Run a bounded router-side iPerf3 throughput test
-  wake        Send Wake-on-LAN to known clients, including offline clients
+  wan         Internet health, global connections, and DNS servers
+  dhcp        DHCP leases and static reservations
+  routes      IPv4 and IPv6 routes
+  mesh        Mesh nodes and backhaul links
+  connections Active NAT connections, optionally --client NAME|IP|MAC
+  forwards    Configured port-forwarding rules
+  vpn peers   WireGuard peer endpoints, handshakes, and counters
+  system      Health; system changes, system save, system reboot
+  logs        Recent router logs, optionally --filter TEXT
+  diagnose    Router-side ping/traceroute to HOST with related logs
+  speedtest   Bounded router-side iPerf3 test against --server HOST
+
+Clients and policies:
+  clients     List clients; clients inspect NAME|IP|MAC; clients rename NAME NEW
+  policy      Connection policies: policy set CLIENT POLICY, policy block CLIENT,
+              policy unblock CLIENT, policy --undo, policy inspect POLICY, --interactive
+  wake        Wake-on-LAN for known clients, including offline ones
+
+Most read-only commands accept --json and --watch SECONDS (1–3600).
 
 Setup and discovery:
       --init                     Configure and test router credentials
@@ -159,7 +150,7 @@ Setup and discovery:
 Status output (without a subcommand):
       --all                      Include disabled, disconnected, and unknown interfaces
       --json                     Emit router and interface status as JSON
-      --watch SECONDS             Refresh a read-only view (1–3600 seconds)
+      --watch SECONDS            Refresh a read-only view (1–3600 seconds)
 
 Global options (before or after a subcommand):
       --router NAME              Select a named router profile
@@ -176,6 +167,28 @@ Configuration: $CONFIG_FILE
 Override it with KEENETIC_CONFIG.
 Run '$PROGRAM COMMAND --help' for command options.
 EOF
+}
+
+# Closest known command by edit distance, for "did you mean" hints.
+suggest_command() {
+    local word=${1,,} best='' best_distance=3 candidate distance
+    for candidate in policy wake interfaces traffic wifi clients system vpn diagnose logs wan dhcp routes mesh speedtest connections forwards; do
+        distance=$(awk -v a="$word" -v b="$candidate" 'BEGIN {
+            n = length(a); m = length(b);
+            for (i = 0; i <= n; i++) d[i, 0] = i;
+            for (j = 0; j <= m; j++) d[0, j] = j;
+            for (i = 1; i <= n; i++) for (j = 1; j <= m; j++) {
+                cost = (substr(a, i, 1) == substr(b, j, 1)) ? 0 : 1;
+                v = d[i - 1, j] + 1; if (d[i, j - 1] + 1 < v) v = d[i, j - 1] + 1;
+                if (d[i - 1, j - 1] + cost < v) v = d[i - 1, j - 1] + cost;
+                d[i, j] = v }
+            print d[n, m] }')
+        if ((distance < best_distance)) || { ((distance == best_distance)) && [[ -z $best ]]; }; then
+            best=$candidate; best_distance=$distance
+        fi
+        [[ $candidate != "$word"* ]] || { best=$candidate; break; }
+    done
+    [[ -z $best ]] || printf '%s' "$best"
 }
 
 wifi_usage() {
@@ -251,9 +264,14 @@ Usage:
   $PROGRAM policy [--all|--offline] [--json]
   $PROGRAM policy --interactive
   $PROGRAM policy CLIENT_NAME
+  $PROGRAM policy set NAME|IP|MAC... POLICY [--dry-run]
+  $PROGRAM policy block|unblock NAME|IP|MAC... [--dry-run]
   $PROGRAM policy SELECTOR... (--policy POLICY|--block|--unblock) [--dry-run]
   $PROGRAM policy --undo [--dry-run]
   $PROGRAM policy inspect POLICY [--json] [--watch SECONDS]
+
+Verb forms detect whether each argument is a MAC, IP, or name. Selectors below
+do the same with explicit flags and can be mixed in one batch.
 
 Selectors (repeatable for batch changes):
       --client NAME              Select by exact client name
@@ -359,7 +377,7 @@ info() {
 
 debug() {
     if $VERBOSE; then
-        printf 'Debug: %s\n' "$*" >&2
+        printf '%sDebug: %s%s\n' "$DIM" "$*" "$RESET" >&2
     fi
 }
 
@@ -379,6 +397,18 @@ add_client_selector() {
     CLIENT_VALUES+=("$value")
 }
 
+# Positional NAME|IP|MAC selectors for verb-style policy commands.
+add_auto_selector() {
+    local value=$1
+    if [[ ${value,,} =~ ^([0-9a-f]{2}:){5}[0-9a-f]{2}$ ]]; then
+        add_client_selector mac "$value"
+    elif [[ $value =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ || ( $value == *:*:* && $value =~ ^[0-9a-fA-F:.]+$ ) ]]; then
+        add_client_selector ip "$value"
+    else
+        add_client_selector client "$value"
+    fi
+}
+
 set_action() {
     local action=$1
     [[ -z $ACTION || $ACTION == "$action" ]] \
@@ -387,13 +417,16 @@ set_action() {
 }
 
 parse_args() {
-    local scope=root selector help=false version=false
+    local scope=root selector help=false version=false suggestion
     local -a positional=()
     while (($#)); do
         if [[ $scope == root ]]; then
             case $1 in
                 policy|wake|interfaces|traffic|wifi|clients|system|vpn|diagnose|logs|wan|dhcp|routes|mesh|speedtest|connections|forwards|--watch|--watch=*|--all|--json|--init|--discover|--router|--router=*|--ca-file|--ca-file=*|--insecure|-q|--quiet|-v|--verbose|--color|--color=*|--no-color|-h|--help|-V|--version) ;;
-                *) fail "$EXIT_USAGE" "unknown command or option: $1. Run '$PROGRAM --help'." ;;
+                -*) fail "$EXIT_USAGE" "unknown command or option: $1. Run '$PROGRAM --help'." ;;
+                *) suggestion=$(suggest_command "$1")
+                   [[ -z $suggestion ]] || suggestion=" Did you mean '$PROGRAM $suggestion'?"
+                   fail "$EXIT_USAGE" "unknown command: $1.$suggestion Run '$PROGRAM --help'." ;;
             esac
         elif [[ $scope == wan || $scope == dhcp || $scope == routes || $scope == mesh || $scope == connections || $scope == forwards || $scope == speedtest ]]; then
             case $1 in
@@ -670,10 +703,23 @@ parse_args() {
                 SUBCOMMAND=${positional[0]}; INSPECT_QUERY=${positional[1]}; positional=()
             fi ;;
         policy)
-            if [[ ${positional[0]-} == inspect ]]; then
-                [[ ${#positional[@]} == 2 ]] || fail "$EXIT_USAGE" 'policy inspect requires a policy ID or description'
-                SUBCOMMAND=inspect; INSPECT_QUERY=${positional[1]}; positional=()
-            fi ;;
+            case ${positional[0]-} in
+                inspect)
+                    [[ ${#positional[@]} == 2 ]] || fail "$EXIT_USAGE" 'policy inspect requires a policy ID or description'
+                    SUBCOMMAND=inspect; INSPECT_QUERY=${positional[1]}; positional=() ;;
+                set)
+                    ((${#positional[@]} >= 3)) || fail "$EXIT_USAGE" 'use policy set NAME|IP|MAC... POLICY'
+                    set_action policy
+                    POLICY_QUERY=${positional[-1]}
+                    [[ -n $POLICY_QUERY ]] || fail "$EXIT_USAGE" 'policy set requires a non-empty policy ID or description'
+                    for value in "${positional[@]:1:${#positional[@]}-2}"; do add_auto_selector "$value"; done
+                    positional=() ;;
+                block|unblock)
+                    ((${#positional[@]} >= 2)) || fail "$EXIT_USAGE" "use policy ${positional[0]} NAME|IP|MAC..."
+                    set_action "${positional[0]}"
+                    for value in "${positional[@]:1}"; do add_auto_selector "$value"; done
+                    positional=() ;;
+            esac ;;
         wifi)
             if ((${#positional[@]})); then
                 [[ ${#positional[@]} == 1 ]] || fail "$EXIT_USAGE" 'use wifi monitor, wifi clients, or wifi scan'
@@ -793,6 +839,7 @@ init_colors() {
         HIGHLIGHT=$'\033[7m'
         RESET=$'\033[0m'
     fi
+    COLOR_ARGS=(--arg red "$RED" --arg green "$GREEN" --arg yellow "$YELLOW" --arg dim "$DIM" --arg reset "$RESET")
 }
 
 trim_key() {
@@ -842,6 +889,8 @@ validate_router_settings() {
     ROUTER_URL=${ROUTER_URL%/}
     [[ $ROUTER_INSECURE == true || $ROUTER_INSECURE == false ]] \
         || fail 'ROUTER_INSECURE must be true or false'
+    [[ $ROUTER_ALLOW_HTTP == true || $ROUTER_ALLOW_HTTP == false ]] \
+        || fail 'ROUTER_ALLOW_HTTP must be true or false'
     if [[ -n $ROUTER_CA_FILE && $ROUTER_INSECURE == true ]]; then
         fail 'ROUTER_CA_FILE and ROUTER_INSECURE=true cannot be combined'
     fi
@@ -872,6 +921,7 @@ Run '$PROGRAM --init' to create and test it."
             ROUTER_PASSWORD_FILE) ROUTER_PASSWORD_FILE=$value ;;
             ROUTER_CA_FILE) ROUTER_CA_FILE=$value ;;
             ROUTER_INSECURE) ROUTER_INSECURE=${value,,} ;;
+            ROUTER_ALLOW_HTTP) ROUTER_ALLOW_HTTP=${value,,} ;;
             *) fail "$CONFIG_FILE:$line_number: unknown setting: $key" ;;
         esac
     done < "$CONFIG_FILE"
@@ -894,7 +944,8 @@ Run '$PROGRAM --init' to create and test it."
         fi
     fi
     if [[ $ROUTER_URL == http://* ]]; then
-        warn 'HTTP does not protect the authenticated router session; prefer HTTPS or KeenDNS.'
+        [[ $ROUTER_ALLOW_HTTP == true ]] \
+            || warn "HTTP does not protect the authenticated router session; prefer HTTPS or KeenDNS. Set ROUTER_ALLOW_HTTP=true in $CONFIG_FILE to hide this."
     elif [[ $ROUTER_INSECURE == true ]]; then
         warn 'HTTPS certificate verification is disabled for this connection.'
     fi
@@ -1112,22 +1163,24 @@ init_config() {
     info 'Configure Keenetic router access. Credentials are tested before being saved.'
     ROUTER_URL=$(prompt_value 'Router URL' 'http://192.168.1.1')
     ROUTER_USERNAME=$(prompt_value 'Username' 'admin')
-    printf 'Password command (leave blank to use a password file or stored password): ' >&2
-    IFS= read -r password_command_input || fail 'configuration input ended unexpectedly'
-    if [[ -n $password_command_input ]]; then
-        ROUTER_PASSWORD_COMMAND=$password_command_input
+    printf 'Password (leave blank to read it from a file or command instead): ' >&2
+    IFS= read -rs ROUTER_PASSWORD || fail 'configuration input ended unexpectedly'
+    printf '\n' >&2
+    if [[ -n $ROUTER_PASSWORD ]]; then
+        printf 'Confirm password: ' >&2
+        IFS= read -rs password_confirmation || fail 'configuration input ended unexpectedly'
+        printf '\n' >&2
+        [[ $ROUTER_PASSWORD == "$password_confirmation" ]] || fail 'passwords do not match'
     else
-        printf 'Password file (leave blank to store the password): ' >&2
+        printf 'Password file (one line; leave blank to use a command): ' >&2
         IFS= read -r password_file_input || fail 'configuration input ended unexpectedly'
         if [[ -n $password_file_input ]]; then
             ROUTER_PASSWORD_FILE=$password_file_input
         else
-            printf 'Password: ' >&2
-            IFS= read -rs ROUTER_PASSWORD || fail 'configuration input ended unexpectedly'
-            printf '\nConfirm password: ' >&2
-            IFS= read -rs password_confirmation || fail 'configuration input ended unexpectedly'
-            printf '\n' >&2
-            [[ $ROUTER_PASSWORD == "$password_confirmation" ]] || fail 'passwords do not match'
+            printf 'Password command (for example: pass show routers/keenetic): ' >&2
+            IFS= read -r password_command_input || fail 'configuration input ended unexpectedly'
+            [[ -n $password_command_input ]] || fail 'a password, password file, or password command is required'
+            ROUTER_PASSWORD_COMMAND=$password_command_input
         fi
     fi
 
@@ -1150,7 +1203,8 @@ init_config() {
     validate_router_settings
 
     if [[ $ROUTER_URL == http://* ]]; then
-        warn 'HTTP does not protect the authenticated router session; prefer HTTPS or KeenDNS.'
+        warn 'HTTP does not protect the authenticated router session; prefer HTTPS or KeenDNS. This warning is shown once; the saved configuration acknowledges it.'
+        ROUTER_ALLOW_HTTP=true
     elif [[ $ROUTER_INSECURE == true ]]; then
         warn 'HTTPS certificate verification is disabled for this connection.'
     fi
@@ -1182,6 +1236,7 @@ init_config() {
         fi
         [[ -z $ROUTER_CA_FILE ]] || printf 'ROUTER_CA_FILE=%s\n' "$ROUTER_CA_FILE"
         printf 'ROUTER_INSECURE=%s\n' "$ROUTER_INSECURE"
+        [[ $ROUTER_ALLOW_HTTP != true ]] || printf 'ROUTER_ALLOW_HTTP=true\n'
     } > "$config_temp"
     mv -f -- "$config_temp" "$CONFIG_FILE"
     success "Connected successfully. Configuration saved to $CONFIG_FILE."
@@ -1382,7 +1437,7 @@ fetch_wifi_networks() {
 }
 
 list_wifi_networks() {
-    jq -r --arg columns "$(terminal_columns)" --arg dim "$DIM" --arg reset "$RESET" \
+    jq -r --arg columns "$(terminal_columns)" "${COLOR_ARGS[@]}" \
         --arg view "$VIEW_MODE" \
         "$(table_format_filter)"'
         def value: if . == null or . == "" then "-" else tostring | clean end;
@@ -1396,7 +1451,7 @@ list_wifi_networks() {
             clients:(.clients | value), status}] as $rows
         | "Wi-Fi networks",
           (if $rows | length == 0 then
-                (if $view == "all" then "No Wi-Fi networks found." else "No active Wi-Fi networks." end) | wordwrap($screen)[]
+                (if $view == "all" then "No Wi-Fi networks found." else "No active Wi-Fi networks. Use --all to include disabled and link-down networks." end) | wordwrap($screen)[]
            else ($screen >= 72) as $wide
             | ([$rows[].status | width] + [6] | max) as $status_width
             | ([$rows[].band | width] + [4] | max) as $band_width
@@ -1414,7 +1469,7 @@ list_wifi_networks() {
                 + (if $wide then ($band | pad($band_width; false)) + "  "
                     + ($channel | pad($channel_width; true)) + "  " + ($width | pad($width_width; true)) + "  "
                     + ($security | fit($security_width; false)) + "  " + ($clients | pad($clients_width; true)) + "  " else "" end)
-                + ($status | pad($status_width; false));
+                + ($status | pad($status_width; false) | paint($status)) | rtrim;
             $dim + line("SSID"; "BAND"; "CH"; "WIDTH"; "SECURITY"; "CLIENTS"; "STATUS") + $reset,
             ($rows[] | line(.ssid; .band; .channel; .width; .security; .clients; .status),
                 (if $wide then empty else
@@ -1491,7 +1546,7 @@ fetch_client_traffic() {
 }
 
 list_client_traffic() {
-    jq -r --arg columns "$(terminal_columns)" --arg dim "$DIM" --arg reset "$RESET" \
+    jq -r --arg columns "$(terminal_columns)" "${COLOR_ARGS[@]}" \
         "$(table_format_filter)"'
         ($columns | tonumber | if . < 20 then 20 else . end) as $screen
         | (.clients | map({name: (.name | clean), ip: ((.ip // "-") | clean),
@@ -1500,7 +1555,7 @@ list_client_traffic() {
         | ("Top \(.limit) clients · last " + (if .period == "3m" then "3 minutes"
             elif .period == "1h" then "1 hour" elif .period == "3h" then "3 hours" else "1 day" end)
             | wordwrap($screen)[]),
-          (if $rows | length == 0 then "No client traffic recorded." | wordwrap($screen)[]
+          (if $rows | length == 0 then "No client traffic recorded in this window. Try a longer --period such as 1h or 1d." | wordwrap($screen)[]
            else
             ($screen >= 72) as $wide
             | ($screen >= 32) as $inline_total
@@ -1520,7 +1575,7 @@ list_client_traffic() {
                 + (if $wide then ($ip | fit($ip_width; false)) + "  "
                     + ($rx | pad($rx_width; true)) + "  " + ($tx | pad($tx_width; true)) + "  " else "" end)
                 + (if $inline_total then ($total | pad($total_width; true)) + "  " else "" end)
-                + ($status | pad($status_width; false));
+                + ($status | pad($status_width; false) | paint($status)) | rtrim;
             $dim + line("NAME"; "IP ADDRESS"; "RX"; "TX"; "TOTAL"; "STATUS") + $reset,
             ($rows[] | line(.name; .ip; .rx; .tx; .total; .status),
                 (if $wide then empty else (.ip, ("RX " + .rx + " / TX " + .tx))
@@ -1609,18 +1664,29 @@ table_format_filter() {
         def duration:
             if . == null then "unknown" else floor as $s
                 | "\($s / 86400 | floor)d \(($s % 86400) / 3600 | floor)h \(($s % 3600) / 60 | floor)m \($s % 60)s" end;
+        # Color for a status word; applied after padding so widths stay correct.
+        def status_color:
+            ascii_downcase
+            | if . == "online" or . == "connected" or . == "link up" or . == "responding" or . == "pass"
+                 or . == "active" or . == "up" or . == "enabled" then $green
+              elif . == "offline" or . == "disconnected" or . == "link down" or . == "not ready" or . == "disabled"
+                 or . == "alternate" or . == "api errors" or . == "warning" or . == "down" or . == "fail" then $yellow
+              elif . == "error" or . == "critical" or . == "blocked" or . == "failed" then $red
+              elif . == "unknown" or . == "unavailable" or . == "-" or . == "none" or . == "(hidden)" then $dim
+              else "" end;
+        def paint($word): ($word | status_color) as $color
+            | if $color == "" then . else $color + . + $reset end;
+        def rtrim: sub(" +(?<tail>(\u001b\\[[0-9;]*m)*)$"; .tail);
+        def unreported: . == "unknown" or . == "unavailable" or . == "" or . == "unknown / unknown"
+            or . == "unavailable / unavailable" or . == "unknown%" or . == "unavailable RX / unavailable TX";
 JQ
 }
 
 list_interface_status() {
     jq -r --arg columns "$(terminal_columns)" \
-        --argjson summary "${1:-true}" --argjson menu "${2:-false}" \
-        --arg green "$GREEN" --arg yellow "$YELLOW" --arg dim "$DIM" --arg reset "$RESET" "$(table_format_filter)"'
-        def status_color:
-            if $menu then ""
-            elif . == "connected" or . == "link up" then $green
-            elif . == "disconnected" or . == "link down" then $yellow
-            else $dim end;
+        --argjson summary "${1:-true}" --argjson menu "${2:-false}" --argjson header_only "${3:-false}" \
+        "${COLOR_ARGS[@]}" "$(table_format_filter)"'
+        def row_color: if $menu then "" else status_color end;
         ($columns | tonumber | if . < 20 then 20 else . end | . - (if $menu then 4 else 0 end)) as $screen
         | . as $router
         | (if $summary then [
@@ -1664,18 +1730,20 @@ list_interface_status() {
             ($name | fit($name_width; false)) + "  "
             + $color + ($status | fit($status_width; false)) + (if $color == "" then "" else $reset end)
             + (if $wide then "  " + ($ip | fit($ip_width; false))
-                + "  " + ($rx | fit($rx_width; true)) + "  " + ($tx | fit($tx_width; true)) else "" end);
-        if $menu then
+                + "  " + ($rx | fit($rx_width; true)) + "  " + ($tx | fit($tx_width; true)) else "" end)
+            | if $menu then . else rtrim end;
+        if $header_only then line("INTERFACE / NAME"; "STATUS"; "IP ADDRESS"; "RX"; "TX"; "")
+        elif $menu then
             $rows[] | (.index | tostring) + "\t"
                 + line(.name; .status; (.addresses | join(", ")); .rx; .tx; "")
         else (true, false) as $vpn
         | (if $summary or ($vpn | not) then "" else empty end),
           ((if $vpn then "VPN / proxy interfaces" else "Other interfaces" end) | wordwrap($screen)[]),
           ([$rows[] | select(.vpn == $vpn)] as $section
-            | if $section | length == 0 then "  None"
+            | if $section | length == 0 then $dim + "  None" + (if $vpn or $summary | not then "" else " (use --all to include inactive interfaces)" end) + $reset
               else $dim + line("INTERFACE / NAME"; "STATUS"; "IP ADDRESS"; "RX"; "TX"; "") + $reset,
                 ($section[] |
-                    line(.name; .status; (.addresses | join(", ")); .rx; .tx; (.status | status_color)),
+                    line(.name; .status; (.addresses | join(", ")); .rx; .tx; (.status | row_color)),
                     (if $wide then empty else
                         ((.addresses | join(", ")), ("RX " + .rx + " / TX " + .tx))
                         | wordwrap($screen - 2)[] | "  " + .
@@ -1811,13 +1879,14 @@ list_clients_table() {
     local empty_message='No connected clients found.'
     [[ $VIEW_MODE == offline ]] && empty_message='No offline clients found.'
     [[ $VIEW_MODE == all ]] && empty_message='No known clients found.'
+    [[ $VIEW_MODE != connected ]] || empty_message+=' Use --all to include offline clients.'
     if ! jq -e 'length > 0' "$TMP_DIR/connected.json" >/dev/null; then
         printf '%s\n' "$empty_message"
         return 0
     fi
     jq -r --slurpfile policies "$TMP_DIR/policies.json" \
         --arg columns "$(terminal_columns)" --arg current "$CURRENT_CLIENT_MAC" \
-        --arg green "$GREEN" --arg dim "$DIM" --arg reset "$RESET" \
+        "${COLOR_ARGS[@]}" \
         "$(table_format_filter) def policy_label: $policy_label_filter;"'
         ($columns | tonumber | if . < 20 then 20 else . end) as $screen
         | [sort_by([if .online then 0 else 1 end, (.name | ascii_downcase)])[]
@@ -1840,14 +1909,14 @@ list_clients_table() {
                 - (if $inline_policy then $policy_width + 2 else 0 end)
                 - (if $wide then $ip_width + 2 else 0 end))]
             | min) as $name_width
-        | def line($name; $ip; $policy; $status):
+        | def line($name; $ip; $policy; $status; $current_row):
             ($name | fit($name_width; false)) + "  "
             + (if $wide then ($ip | fit($ip_width; false)) + "  " else "" end)
             + (if $inline_policy then ($policy | fit($policy_width; false)) + "  " else "" end)
-            + ($status | pad($status_width; false));
-        $dim + line("NAME"; "IP ADDRESS"; "POLICY"; "STATUS") + $reset,
+            + ($status | pad($status_width; false) | (if $current_row then . else paint($status) end)) | rtrim;
+        $dim + line("NAME"; "IP ADDRESS"; "POLICY"; "STATUS"; false) + $reset,
         ($rows[] | (if .current then $green else "" end)
-            + line(.name; .ip; .policy; .status) + (if .current then $reset else "" end),
+            + line(.name; .ip; .policy; .status; .current) + (if .current then $reset else "" end),
             (if $wide then empty else .ip | wordwrap($screen - 2)[] | "  " + . end),
             (if $inline_policy then empty else "Policy: " + .policy | wordwrap($screen - 2)[] | "  " + . end))
     ' "$TMP_DIR/connected.json"
@@ -1930,6 +1999,13 @@ arrow_menu() {
     trap 'MENU_RESIZED=true' WINCH
     printf '\033[?25l' >&2
     printf 'Use Up/Down arrows, Enter to select, or Esc/q to cancel.\n' >&2
+    if [[ $MENU_KIND == client ]]; then
+        compute_client_widths 4
+        printf "    %s%-${CLIENT_NAME_WIDTH}.${CLIENT_NAME_WIDTH}s %-${CLIENT_IP_WIDTH}.${CLIENT_IP_WIDTH}s %-${CLIENT_POLICY_WIDTH}.${CLIENT_POLICY_WIDTH}s%s\n" \
+            "$DIM" 'NAME' 'IP ADDRESS' 'POLICY' "$RESET" >&2
+    elif [[ $MENU_KIND == interface ]]; then
+        printf '    %s%s%s\n' "$DIM" "$(list_interface_status false true true)" "$RESET" >&2
+    fi
     render_arrow_menu "$selected" false
     while true; do
         if ! IFS= read -rsn1 -t 0.2 key; then
@@ -2075,10 +2151,33 @@ Use --all to include offline clients."
     elif $allow_prompt; then
         select_client_from_candidates "$matches" "Multiple clients match $label:" || return 1
     else
-        printf 'Multiple clients match %s:\n' "$label" >&2
-        jq -r 'sort_by(.ip)[] | "  \(.name)  \(.ip)  \(.mac)"' <<< "$matches" >&2
+        printf 'Multiple clients match %s. Re-run with an exact address:\n' "$label" >&2
+        jq -r --arg program "$PROGRAM" --arg command "$(action_command_suffix)" \
+            'sort_by(.ip)[] | .ip as $ip | "  \($program) \($command | sub("SELECTOR"; "--ip " + $ip))    (\(.name), \(.mac))"' <<< "$matches" >&2
         fail "$EXIT_CLIENT" "client selector is ambiguous; use --ip or --mac"
     fi
+}
+
+# Command tail that reproduces the current action with a SELECTOR placeholder.
+action_command_suffix() {
+    case $ACTION in
+        wake) printf 'wake SELECTOR' ;;
+        policy) printf 'policy SELECTOR --policy %q' "$POLICY_QUERY" ;;
+        block) printf 'policy SELECTOR --block' ;;
+        unblock) printf 'policy SELECTOR --unblock' ;;
+        *) printf 'policy SELECTOR' ;;
+    esac
+    $DRY_RUN && printf ' --dry-run'
+    return 0
+}
+
+# Shared ambiguity report for positional NAME|IP|MAC lookups.
+ambiguous_lookup() {
+    local matches=$1 command=$2
+    printf 'Multiple clients match %s. Re-run with an exact address:\n' "$INSPECT_QUERY" >&2
+    jq -r --arg program "$PROGRAM" --arg command "$command" \
+        'sort_by(.ip)[] | .ip as $ip | "  \($program) \($command | sub("SELECTOR"; $ip))    (\(.name), \(.mac))"' <<< "$matches" >&2
+    fail "$EXIT_CLIENT" 'client name is ambiguous; use its IP or MAC address'
 }
 
 select_any_client() {
@@ -2489,41 +2588,53 @@ report_format_filter() {
         def number: if type == "number" or type == "string" then (try tonumber catch null) else null end;
         def nonnegative: number | if . != null and . >= 0 then . else null end;
         ($columns | tonumber | if . < 20 then 20 else . end) as $screen
-        | def fields($title; $rows):
+        | def label_case: (.[0:1] | ascii_upcase) + (.[1:] | ascii_downcase);
+          # Key/value block. Fields whose value is not reported are folded into one dim line
+          # so real data stands out; JSON output keeps every field.
+          def fields($title; $rows):
             ($title | clean | wordwrap($screen)[]),
-            (($rows | map(.[0] | width) | max // 0) as $natural
+            (($rows | map([(.[0] | clean), (.[1] | text)])) as $all
+             | ($all | map(select(.[1] | unreported | not))) as $known
+             | ($all | map(select(.[1] | unreported)) | map(.[0])) as $missing
+             | ($known | map(.[0] | width) | max // 0) as $natural
              | ([$natural, 22] | min) as $label_width
-             | $rows[] | (.[0] | clean) as $field_label | (.[1] | text) as $value
-             | if $screen < 40 then $dim + $field_label + $reset, ($value | wordwrap($screen - 2)[] | "  " + .)
-               else ($value | wordwrap($screen - $label_width - 2) | to_entries[])
-                 | $dim + ((if .key == 0 then $field_label else "" end) | fit($label_width; false)) + $reset + "  " + .value end);
-          def grid($title; $headers; $data):
+             | ($known[] | .[0] as $field_label | .[1] as $value
+                | if $screen < 40 then $dim + $field_label + $reset, ($value | wordwrap($screen - 2)[] | "  " + . | paint($value))
+                  else ($value | wordwrap($screen - $label_width - 2) | to_entries[])
+                    | $dim + ((if .key == 0 then $field_label else "" end) | fit($label_width; false)) + $reset + "  " + (.value | paint($value)) end),
+               (if $missing | length == 0 then empty
+                else ("Not reported: " + ($missing | join(", "))) | wordwrap($screen)[] | $dim + . + $reset end));
+          def grid($title; $headers; $data; $hint):
             ($title | clean | wordwrap($screen)[]),
-            (if $data | length == 0 then "None"
+            (if $data | length == 0 then ($dim + (if $hint == "" then "None" else $hint end) + $reset)
              else ($data | map(map(text))) as $rows
                | ($headers | length) as $n
                | if $screen < 72 then
                    $rows[] | . as $row
                    | ($row[0] | wordwrap($screen)[]),
-                     (range(1; $n) as $i | ($headers[$i] + ": " + $row[$i]) | wordwrap($screen - 2)[] | "  " + .)
+                     (range(1; $n) as $i | $row[$i] as $value
+                      | (($headers[$i] | label_case) + ": " + $value) | wordwrap($screen - 2)[] | "  " + . | paint($value))
                  else
                    [range(0; $n) as $i | ([$headers[$i] | width] + [$rows[] | .[$i] | width] | max)
                       | [., 40] | min] as $natural
                    | ([($natural | add) - ($screen - 2 * ($n - 1)), 0] | max) as $excess
                    | (reduce range(0; $excess) as $step ($natural;
                         max as $largest | index($largest) as $i | .[$i] -= 1)) as $widths
-                   | def line($row): [range(0; $n) as $i | $row[$i] | fit($widths[$i]; false)] | join("  ");
-                   $dim + line($headers) + $reset, ($rows[] | line(.))
+                   | def line($row): [range(0; $n) as $i | $row[$i] | fit($widths[$i]; false) | paint($row[$i])] | join("  ") | rtrim;
+                   $dim + ([range(0; $n) as $i | $headers[$i] | fit($widths[$i]; false)] | join("  ") | rtrim) + $reset, ($rows[] | line(.))
                  end
              end);
+          def grid($title; $headers; $data): grid($title; $headers; $data; "");
 JQ
 }
 
 render_report() {
-    local file=$1 filter=$2
+    local file=$1
+    shift
     if $JSON_OUTPUT; then cat "$file"; return; fi
-    jq -r --arg columns "$(terminal_columns)" --arg dim "$DIM" --arg reset "$RESET" \
-        "$(table_format_filter) $(report_format_filter) $filter" "$file"
+    # Extra jq arguments may precede the filter, which is always the last argument.
+    jq -r --arg columns "$(terminal_columns)" "${COLOR_ARGS[@]}" "${@:1:$#-1}" \
+        "$(table_format_filter) $(report_format_filter) ${*: -1}" "$file"
 }
 
 system_reboot() {
@@ -2599,7 +2710,8 @@ vpn_main() {
                     (if .endpoint_address | contains(":") then "[" + .endpoint_address + "]" else .endpoint_address end)
                     + (if .endpoint_port == null then "" else ":" + (.endpoint_port | tostring) end) end),
                 (if .handshake_age_seconds == null then null else (.handshake_age_seconds | tostring) + "s ago" end),
-                (.rx_bytes | bytes),(.tx_bytes | bytes),.status]])'
+                (.rx_bytes | bytes),(.tx_bytes | bytes),.status]];
+            "No WireGuard peers are configured. Other VPN types appear in keenetic interfaces --all.")'
 }
 
 wifi_monitor_main() {
@@ -2632,9 +2744,11 @@ wifi_monitor_main() {
         ($loads[0] | map({key:.id,value:.}) | from_entries) as $by_id
         | {router:$router,window_seconds:180,radios:map(. + $by_id[.id])}
     ' "$TMP_DIR/radios.json" > "$TMP_DIR/wifi-monitor.json"
-    render_report "$TMP_DIR/wifi-monitor.json" '
+    # shellcheck disable=SC2016 # Variables in the filter belong to jq.
+    render_report "$TMP_DIR/wifi-monitor.json" --arg view "$VIEW_MODE" '
         grid("Wi-Fi channel utilization · last 3 minutes"; ["RADIO","CH","WIDTH MHz","NOW %","AVG %","PEAK %","STATE"];
-            [.radios[] | [.id,.channel,.width_mhz,.current_percent,.average_percent,.peak_percent,.state]])'
+            [.radios[] | [.id,.channel,.width_mhz,.current_percent,.average_percent,.peak_percent,.state]];
+            (if $view == "all" then "No Wi-Fi radios were reported." else "No enabled Wi-Fi radios. Use --all to include disabled radios." end))'
 }
 
 clients_main() {
@@ -2651,8 +2765,8 @@ clients_main() {
     matches=$(jq --arg query "$INSPECT_QUERY" '[.[] | select(.ip == $query or .mac == ($query | ascii_downcase)
         or (.name | ascii_downcase) == ($query | ascii_downcase))] | unique_by(.mac)' "$TMP_DIR/all-clients.json")
     count=$(jq 'length' <<< "$matches")
-    ((count > 0)) || fail "$EXIT_CLIENT" "no client matches $INSPECT_QUERY"
-    ((count == 1)) || fail "$EXIT_CLIENT" 'client name is ambiguous; use its IP or MAC address'
+    ((count > 0)) || fail "$EXIT_CLIENT" "no client matches $INSPECT_QUERY. Names are matched exactly; try 'keenetic clients --all' to list known clients."
+    ((count == 1)) || ambiguous_lookup "$matches" 'clients inspect SELECTOR'
     SELECTED_CLIENT=$(jq -c '.[0]' <<< "$matches")
     mac=$(jq -r '.mac' <<< "$SELECTED_CLIENT")
     read_optional_json '/rci/show/ip/hotspot/summary?detail=0&attribute=sumbytes' "$TMP_DIR/inspect-traffic.json" object 'Recent client traffic'
@@ -2712,9 +2826,11 @@ inspect_policy() {
     render_report "$TMP_DIR/policy-inspect.json" '
         fields("Policy details"; [["Name",.name],["ID",(.id // "Default")]]),"",
         grid("Interfaces"; ["ORDER","INTERFACE","ENABLED","PRIORITY","STATUS"];
-            [.interfaces[] | [.order,.id,.enabled,.priority,.status]]),"",
+            [.interfaces[] | [.order,.id,.enabled,.priority,.status]];
+            "This policy permits no interfaces; clients assigned to it have no route."),"",
         grid("Assigned clients"; ["NAME","IP","STATUS","BLOCKED"];
-            [.clients[] | [.name,.ip,(if .online then "online" else "offline" end),.blocked]])'
+            [.clients[] | [.name,.ip,(if .online then "online" else "offline" end),.blocked]];
+            "No clients use this policy. Assign one with keenetic policy set CLIENT POLICY.")'
 }
 
 fetch_logs() {
@@ -2735,9 +2851,11 @@ fetch_logs() {
 logs_main() {
     start_router_session
     fetch_logs
-    render_report "$TMP_DIR/logs.json" '
+    # shellcheck disable=SC2016 # Variables in the filter belong to jq.
+    render_report "$TMP_DIR/logs.json" --arg filter "$LOG_FILTER" '
         grid("Router logs"; ["TIME","LEVEL","SOURCE","MESSAGE"];
-            [.entries[] | [.timestamp,.level,.source,.message]])'
+            [.entries[] | [.timestamp,.level,.source,.message]];
+            (if $filter == "" then "The router returned no log entries." else "No recent log entries match --filter " + ($filter | tojson) + ". Raise --limit to search further back." end))'
 }
 
 run_diagnostic_test() {
@@ -2914,8 +3032,10 @@ wan_main() {
         fields("Internet health"; [["Internet",.internet],["Reliable",.reliable],["Active interface",.active_interface],
             ["Gateway",.gateway],["Gateway reachable",.gateway_accessible],["DNS reachable",.dns_accessible],["Checked",.checked]]),"",
         grid("Internet connections"; ["INTERFACE","NAME","ROLE","STATUS","ADDRESS","PRIORITY"];
-            [.connections[] | [.id,.description,.role,.status,.address,.priority]]),"",
-        grid("DNS servers"; ["SERVER","TRANSPORT","INTERFACE"]; [.dns_servers[] | [.address,.transport,.interface]]),"",
+            [.connections[] | [.id,.description,.role,.status,.address,.priority]];
+            "No interfaces are marked as global Internet connections."),"",
+        grid("DNS servers"; ["SERVER","TRANSPORT","INTERFACE"]; [.dns_servers[] | [.address,.transport,.interface]];
+            "No DNS servers were reported."),"",
         (if .checks == null then "Connection checks unavailable" else
             grid("Connection checks"; ["INTERFACE","PROFILE","STATUS","PASS","FAIL"];
                 [.checks[] | [.interface,.profile,.status,.successes,.failures]]) end)'
@@ -2943,7 +3063,8 @@ dhcp_main() {
     ' --slurpfile reserved "$TMP_DIR/dhcp-static.json"
     render_report "$TMP_DIR/dhcp.json" '
         grid("DHCP leases and reservations"; ["NAME","IP","MAC","TYPE","EXPIRES","LEASE"];
-            [.leases[] | [.name,.ip,.mac,.assignment,(if .infinite then "infinite" else (.expires_seconds | duration) end),.lease_present]])'
+            [.leases[] | [.name,.ip,.mac,.assignment,(if .infinite then "infinite" else (.expires_seconds | duration) end),.lease_present]];
+            "No DHCP leases or static reservations exist.")'
 }
 
 mesh_main() {
@@ -2965,7 +3086,8 @@ mesh_main() {
     render_report "$TMP_DIR/mesh.json" '
         fields("Mesh controller"; [["Auto update",.auto_update],["Update pending",.update_pending]]),"",
         grid("Mesh nodes"; ["NODE","IP","STATUS","UPLINK","PARENT","SIGNAL","CLIENTS"];
-            [.members[] | [.name,.ip,.status,.uplink,.parent,.signal_dbm,.clients]])'
+            [.members[] | [.name,.ip,.status,.uplink,.parent,.signal_dbm,.clients]];
+            "No mesh extenders are connected to this router.")'
 }
 
 wifi_clients_main() {
@@ -2983,7 +3105,8 @@ wifi_clients_main() {
     ' --slurpfile hosts "$TMP_DIR/station-hosts.json"
     render_report "$TMP_DIR/stations.json" '
         grid("Associated Wi-Fi clients"; ["NAME / MAC","AP","SIGNAL","TX Mbps","STANDARD","WIDTH","STREAMS"];
-            [.clients[] | [(.name // .mac),.ap,.signal_dbm,.tx_rate_mbps,.standard,.channel_width_mhz,.spatial_streams]])'
+            [.clients[] | [(.name // .mac),.ap,.signal_dbm,.tx_rate_mbps,.standard,.channel_width_mhz,.spatial_streams]];
+            "No stations are associated with this router\u0027s Wi-Fi.")'
 }
 
 wifi_scan_main() {
@@ -3015,7 +3138,8 @@ wifi_scan_main() {
     jq --arg router "$ROUTER_URL" '{router:$router,networks:(sort_by(-(.signal_dbm // -999)))}' "$TMP_DIR/scan-cells.json" > "$TMP_DIR/scan.json"
     render_report "$TMP_DIR/scan.json" '
         grid("Nearby Wi-Fi networks"; ["SSID","BSSID","RADIO","CH","SIGNAL","SECURITY"];
-            [.networks[] | [(.ssid | if . == "" then "(hidden)" else . end),.bssid,.radio,.channel,.signal_dbm,.security]])'
+            [.networks[] | [(.ssid | if . == "" then "(hidden)" else . end),.bssid,.radio,.channel,.signal_dbm,.security]];
+            "The survey found no nearby networks.")'
 }
 
 select_report_client() {
@@ -3025,8 +3149,8 @@ select_report_client() {
     matches=$(jq --arg query "$INSPECT_QUERY" '[.[] | select(.ip == $query or .mac == ($query | ascii_downcase)
         or (.name | ascii_downcase) == ($query | ascii_downcase))] | unique_by(.mac)' "$TMP_DIR/all-clients.json")
     count=$(jq 'length' <<< "$matches")
-    ((count > 0)) || fail "$EXIT_CLIENT" "no client matches $INSPECT_QUERY"
-    ((count == 1)) || fail "$EXIT_CLIENT" 'client name is ambiguous; use its IP or MAC address'
+    ((count > 0)) || fail "$EXIT_CLIENT" "no client matches $INSPECT_QUERY. Names are matched exactly; try 'keenetic clients --all' to list known clients."
+    ((count == 1)) || ambiguous_lookup "$matches" "$COMMAND $([[ $SUBCOMMAND == rename ]] && printf 'rename SELECTOR %q' "$NEW_CLIENT_NAME" || printf -- '--client SELECTOR')"
     SELECTED_CLIENT=$(jq -c '.[0]' <<< "$matches")
 }
 
@@ -3054,7 +3178,8 @@ connections_main() {
         def endpoint($ip; $port): (if $ip == null then "unknown" elif $ip | contains(":") then "["+$ip+"]" else $ip end)
             + (if $port == null then "" else ":"+($port | tostring) end);
         grid("Active NAT connections"; ["SOURCE","DESTINATION","PROTO","BYTES","REPLY BYTES"];
-            [.connections[] | [endpoint(.source;.source_port),endpoint(.destination;.destination_port),.protocol,(.bytes | bytes),(.reply_bytes | bytes)]])'
+            [.connections[] | [endpoint(.source;.source_port),endpoint(.destination;.destination_port),.protocol,(.bytes | bytes),(.reply_bytes | bytes)]];
+            (if .client_ip == null then "The NAT table has no active connections." else "No active NAT connections for " + .client_ip + "." end))'
 }
 
 forwards_main() {
@@ -3071,7 +3196,8 @@ forwards_main() {
     render_report "$TMP_DIR/forwards.json" '
         grid("Port forwarding rules"; ["INTERFACE","PROTO","PORT","DESTINATION","TO PORT","ENABLED","COMMENT"];
             [.rules[] | [.interface,.protocol,((.port | text) + (if .end_port == null then "" else "–"+(.end_port | text) end)),
-                .destination,.destination_port,.enabled,.comment]])'
+                .destination,.destination_port,.enabled,.comment]];
+            "No port-forwarding rules are configured.")'
 }
 
 fetch_changes() {
@@ -3194,7 +3320,7 @@ select_interface_interactively() {
     if command -v "$FZF_COMMAND" >/dev/null 2>&1; then
         selected=$(list_interface_status false true \
             | "$FZF_COMMAND" --delimiter=$'\t' --with-nth=2.. --height=70% --layout=reverse \
-                --prompt='Interface> ' --header='Select interface (including inactive interfaces)') || {
+                --prompt='Interface> ' --header='Select interface (including inactive interfaces)'$'\n'"$(list_interface_status false true true)") || {
             unchanged 'No changes made.'
             return 1
         }
@@ -3515,7 +3641,8 @@ main() {
         if $JSON_OUTPUT; then
             jq -c . "$TMP_DIR/watch-frame"
         else
-            printf '\033[H%s\033[J' "$(cat "$TMP_DIR/watch-frame")"
+            printf '\033[H%sEvery %ss · updated %s · Ctrl-C to exit%s\n\n%s\033[J' \
+                "$DIM" "$WATCH_INTERVAL" "$(date +%H:%M:%S)" "$RESET" "$(cat "$TMP_DIR/watch-frame")"
         fi
         sleep "$WATCH_INTERVAL" &
         WATCH_SLEEP_PID=$!

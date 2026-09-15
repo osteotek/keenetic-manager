@@ -36,6 +36,7 @@ trap cleanup EXIT
 mkdir -p -- "$work/$PACKAGE/completions"
 install -m755 "$ROOT/keenetic" "$work/$PACKAGE/keenetic"
 install -m644 "$ROOT/completions/keenetic.bash" "$work/$PACKAGE/completions/keenetic.bash"
+install -m644 "$ROOT/completions/_keenetic" "$work/$PACKAGE/completions/_keenetic"
 install -m644 "$ROOT/README.md" "$ROOT/LICENSE" "$ROOT/CHANGELOG.md" "$ROOT/config.example" "$work/$PACKAGE/"
 install -m755 "$ROOT/keenetic" "$DIST/keenetic"
 

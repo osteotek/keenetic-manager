@@ -16,6 +16,7 @@ package() {
     install -Dm755 keenetic "$pkgdir/usr/bin/keenetic"
     install -Dm644 completions/keenetic.bash \
         "$pkgdir/usr/share/bash-completion/completions/keenetic"
+    install -Dm644 completions/_keenetic "$pkgdir/usr/share/zsh/site-functions/_keenetic"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
     install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
     install -Dm644 config.example "$pkgdir/usr/share/doc/$pkgname/config.example"

@@ -46,7 +46,7 @@ _keenetic() {
             $setup || options="policy wake interfaces traffic wifi clients system vpn diagnose logs wan dhcp routes mesh speedtest connections forwards --watch --all --json $options"
             ;;
         policy)
-            options="inspect --watch --interactive --client --ip --mac --policy --block --unblock --undo --dry-run --all --offline --json $global_options"
+            options="inspect set block unblock --watch --interactive --client --ip --mac --policy --block --unblock --undo --dry-run --all --offline --json $global_options"
             ;;
         interfaces)
             options="inspect --rates --sample --watch --interactive --dry-run --all --json $global_options"

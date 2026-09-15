@@ -12,13 +12,13 @@ A Bash CLI for Keenetic routers. Inspect status, clients, Wi-Fi, traffic, and VP
 - **Traffic ranking.** Top clients by received and sent bytes over the router's 3-minute, 1-hour, 3-hour, or 1-day Traffic Monitor windows.
 - **Network state.** WAN health and DNS servers, DHCP leases and reservations, IPv4/IPv6 routing table, mesh members and backhaul, live NAT connections, and port-forwarding rules.
 - **Clients.** List online and offline clients, inspect connection, policy, and traffic details, and rename devices.
-- **Connection policies.** Assign clients to policies, block or unblock Internet access, batch changes with dry runs, undo verified changes, and inspect policy interface order.
+- **Connection policies.** Assign clients to policies with `policy set CLIENT POLICY`, block or unblock Internet access, batch changes with dry runs, undo verified changes, and inspect policy interface order.
 - **VPN.** WireGuard peers with endpoints, handshake age, counters, and status.
 - **System.** Model, firmware, uptime, CPU, memory, and connection-table usage; pending configuration changes; save configuration; reboot.
 - **Diagnostics.** Router-side ping and traceroute, iPerf3 throughput tests, and recent logs with filtering.
 - **Wake-on-LAN** for known clients, including offline ones.
 - **Live views.** Refresh any read-only view in place with `--watch`, or stream NDJSON snapshots for scripts.
-- **Scripting.** `--json` on every view, stable exit codes, `--quiet` and `--verbose`, and Bash completion.
+- **Scripting.** `--json` on every view, stable exit codes, `--quiet` and `--verbose`, and Bash and zsh completion.
 - **Multiple routers.** Named profiles, password files or commands, private CA trust, and default-gateway discovery.
 
 All read-only views make no configuration changes. Mutations verify the router's state after writing and support `--dry-run`.
@@ -43,7 +43,7 @@ make install
 keenetic --init
 ```
 
-The default installation path is `~/.local/bin/keenetic`. Ensure it is in `PATH`. `make uninstall` removes the executable and Bash completion.
+The default installation path is `~/.local/bin/keenetic`. Ensure it is in `PATH`. Bash completion installs to `~/.local/share/bash-completion/completions/` and zsh completion to `~/.local/share/zsh/site-functions/`; add that directory to `fpath` before `compinit` if it is not already there. `make uninstall` removes the executable and both completions.
 
 Tagged releases publish a standalone `keenetic` executable, `SHA256SUMS`, and a source archive. Packaging definitions live under `packaging/` for Arch/AUR, Homebrew, and Debian.
 
@@ -56,6 +56,8 @@ keenetic wifi            # Wi-Fi networks
 keenetic traffic         # top clients by traffic
 keenetic --help          # command overview
 ```
+
+Mistyped commands get a suggestion, for example `keenetic clinets` answers with `Did you mean 'keenetic clients'?`.
 
 ## Command overview
 
@@ -72,7 +74,7 @@ keenetic --help          # command overview
 | `keenetic connections` | [Active NAT connections](#active-connections-and-port-forwarding), optionally per client |
 | `keenetic forwards` | [Port-forwarding rules](#active-connections-and-port-forwarding) |
 | `keenetic clients` | [Clients](#clients-and-connection-policies): list, `inspect`, `rename` |
-| `keenetic policy` | [Connection policies](#clients-and-connection-policies): list, assign, block, undo, `inspect` |
+| `keenetic policy` | [Connection policies](#clients-and-connection-policies): list, `set`, `block`, `unblock`, `--undo`, `inspect` |
 | `keenetic wake` | [Wake-on-LAN](#wake-on-lan) |
 | `keenetic system` | [System health](#system-health), `changes`, `save`, `reboot` |
 | `keenetic vpn peers` | [VPN peers](#vpn-peers): WireGuard status |
@@ -83,6 +85,8 @@ keenetic --help          # command overview
 
 Add `--json` to any read-only view for machine-readable output and `--watch SECONDS` to refresh it in place. See [Live views](#live-views) and [Global options](#global-options).
 
+Text output colors status words when writing to a terminal: green for online, connected, or passing states, yellow for offline, disconnected, or not-ready states, red for errors and blocks, and dim for unknown values. Detail views fold fields the router did not report into a single dim `Not reported:` line so real data stands out; JSON keeps every field with `null` values. Colors follow `--color`, `--no-color`, and `NO_COLOR`.
+
 ## Configuration
 
 Create and test the default configuration interactively:
@@ -90,6 +94,8 @@ Create and test the default configuration interactively:
 ```bash
 keenetic --init
 ```
+
+The prompts ask for the router URL, username, and password. Leave the password blank to store a password file path or a password command instead. HTTPS URLs then ask for a trusted CA file.
 
 Configuration and history retain the `keenetic-policy` directory name for compatibility with existing installations.
 
@@ -103,6 +109,8 @@ ROUTER_INSECURE=false
 ```
 
 The generated file has mode `0600`. Values are literal; shell syntax is not evaluated.
+
+Plain `http://` URLs print a warning on every run because the authenticated session is unprotected. `--init` shows the warning once and writes `ROUTER_ALLOW_HTTP=true` to acknowledge it. Add that line to an existing configuration to silence the warning.
 
 ### Password sources
 
@@ -441,7 +449,7 @@ keenetic policy inspect VPN --watch 5
 keenetic logs --watch 5
 ```
 
-The interval is an integer from 1 to 3600 seconds, measured after each completed refresh. Terminal output uses an alternate screen, adapts to width changes, and restores the screen/cursor on Ctrl-C. For scripts, `keenetic system --watch 2 --json` emits one complete JSON snapshot per line (NDJSON), suitable for pipes. Authentication is reused between refreshes. Watch cannot be combined with interactive actions or diagnostics. Watched logs are repeated recent snapshots, so entries can appear in multiple frames.
+The interval is an integer from 1 to 3600 seconds, measured after each completed refresh. Terminal output uses an alternate screen with a header showing the interval, the last refresh time, and the exit key. It adapts to width changes and restores the screen/cursor on Ctrl-C. For scripts, `keenetic system --watch 2 --json` emits one complete JSON snapshot per line (NDJSON), suitable for pipes. Authentication is reused between refreshes. Watch cannot be combined with interactive actions or diagnostics. Watched logs are repeated recent snapshots, so entries can appear in multiple frames.
 
 ## Management
 
@@ -501,22 +509,26 @@ When `fzf` is available, both client and policy menus are searchable, and client
 
 #### Assigning policies and blocking
 
-Selectors match exact name, IP address, or MAC address:
+The verb forms take one or more clients by name, IP address, or MAC address and detect which was given:
+
+```bash
+keenetic policy set "Living Room TV" VPN
+keenetic policy set 192.168.1.20 aa:bb:cc:dd:ee:ff Policy1
+keenetic policy block Tablet
+keenetic policy unblock Tablet
+```
+
+The equivalent flag forms use explicit selectors, which can be mixed in one batch:
 
 ```bash
 keenetic policy --client "Living Room TV" --policy VPN
 keenetic policy --ip 192.168.1.20 --policy Policy1
 keenetic policy --mac aa:bb:cc:dd:ee:ff --policy Default
-```
-
-Policy descriptions and IDs are matched case-insensitively. The CLI retries read-back verification at 0, 250, 500, and 1000 milliseconds before reporting verification failure.
-
-Block or unblock Internet access:
-
-```bash
 keenetic policy --client Tablet --block
 keenetic policy --client Tablet --unblock
 ```
+
+Policy descriptions and IDs are matched case-insensitively. The CLI retries read-back verification at 0, 250, 500, and 1000 milliseconds before reporting verification failure. When a name matches several clients, the error lists a ready-to-run command for each candidate using its IP address.
 
 #### Batch changes and dry runs
 

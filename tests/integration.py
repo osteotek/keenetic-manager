@@ -757,7 +757,9 @@ def main():
             root_env = base_env(temp / "missing-config")
             for args, status, expected in (
                 ([], 1, "--init"),
-                (["--help"], 0, "Commands:"),
+                (["--help"], 0, "Status and monitoring:"),
+                (["--help"], 0, "Clients and policies:"),
+                (["clinets"], 2, "Did you mean 'keenetic clients'"),
                 (["policy", "--help"], 0, "keenetic policy --interactive"),
                 (["interfaces", "--help"], 0, "keenetic interfaces --interactive"),
                 (["traffic", "--help"], 0, "keenetic traffic [--top N]"),
@@ -1581,11 +1583,14 @@ def main():
             report(index, "native arrow fallback and duplicate disambiguation"); index += 1
 
             init_path = temp / "initialized" / "config"
-            init_input = f"{url}\n{USERNAME}\n\n\n{PASSWORD}\n{PASSWORD}\n"
+            init_input = f"{url}\n{USERNAME}\n{PASSWORD}\n{PASSWORD}\n"
             initialized = run(init_path, "--init", input_text=init_input, subcommand=None)
             check(initialized.returncode == 0, initialized.stderr)
             check(stat.S_IMODE(init_path.stat().st_mode) == 0o600, "initialized config mode")
             check("ROUTER_INSECURE=false" in init_path.read_text(), "TLS setting not saved")
+            check("ROUTER_ALLOW_HTTP=true" in init_path.read_text(), "HTTP acknowledgement not saved")
+            check("HTTP does not protect" not in run(init_path, subcommand="clients").stderr,
+                  "HTTP warning repeated after init acknowledged it")
             report(index, "secure guided configuration"); index += 1
 
             config_home = temp / "config-home"
@@ -2143,6 +2148,27 @@ def main():
                 else:
                     check(expected in completion.stdout.splitlines(), f"missing completion for {words}")
             report(index, "static Bash completion"); index += 1
+
+            verb = run(config, "set", "192.0.2.10", "VPN", "--dry-run")
+            check(verb.returncode == 0 and ("Would set Laptop" in verb.stdout or "already uses" in verb.stdout), verb.stderr)
+            verb = run(config, "block", "Laptop", "02:00:00:00:00:20", "--dry-run")
+            check(verb.returncode == 0 and "Plan (2 clients)" in verb.stdout, verb.stdout + verb.stderr)
+            ambiguous = run(config, "set", "Phone", "VPN")
+            check(ambiguous.returncode == 3 and "keenetic policy --ip 192.0.2.20 --policy VPN" in ambiguous.stderr, ambiguous.stderr)
+            ambiguous = run(config, "inspect", "Phone", subcommand="clients")
+            check(ambiguous.returncode == 3 and "keenetic clients inspect 192.0.2.21" in ambiguous.stderr, ambiguous.stderr)
+            typo = run(config, subcommand="clinets")
+            check(typo.returncode == 2 and "Did you mean 'keenetic clients'" in typo.stderr, typo.stderr)
+            health = run(config, subcommand="system")
+            check(health.returncode == 0 and "Not reported:" in health.stdout and "unavailable" not in health.stdout,
+                  "unknown fields were not folded: " + health.stdout)
+            check(json.loads(run(config, "--json", subcommand="system").stdout)["memory"]["cached_bytes"] is None,
+                  "JSON output lost an unknown field")
+            colored = run(config, "--color=always", subcommand="clients")
+            check("\x1b[32monline\x1b[0m" in colored.stdout, "status word was not colored")
+            plain = run(config, subcommand="traffic")
+            check(plain.returncode == 0 and not any(line.endswith(" ") for line in plain.stdout.splitlines()), "trailing spaces in table")
+            report(index, "verb aliases, ambiguity hints, typo suggestions, folded unknown fields, and colors"); index += 1
 
         print(f"1..{index - 1}")
     finally:
